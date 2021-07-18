@@ -3,6 +3,8 @@ from autolab_core import RigidTransform
 import numpy as np
 
 class YuMiKinematics():
+    #these states are high manipulability configurations with elbows up and out,
+    #and grippers facing perpendicularly down
     L_NICE_STATE=np.deg2rad(np.array([-71.52785377, -62.91241387, 61.09700753, 17.98294573,
              108.93368164,  75.65987325, 139.55185761]))
     R_NICE_STATE=np.array([ 1.21442839, -1.03205606, -1.10072738,  0.2987352,  
@@ -26,12 +28,15 @@ class YuMiKinematics():
         % Manipulation2: runs for full timeout, returns solution that minimizes the ratio of min to max singular values of the Jacobian.
 '''
         self.left_solvers={}
-        self.left_solvers["Distance"]=TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.04,solve_type="Distance")
+        self.left_solvers["Distance"]=TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Distance")
         self.left_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Manipulation1")
+        self.left_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Speed")
+
         self.right_solvers={}
-        self.right_solvers["Distance"]= TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.04,solve_type="Distance")
-        self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.2,solve_type="Manipulation1")
-       
+        self.right_solvers["Distance"]= TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Distance")
+        self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Manipulation1")
+        self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Speed")
+
     def ik(self, left_pose=None, right_pose=None, left_qinit=None, right_qinit=None, solve_type="Distance"):
         '''
         given left and/or right target poses, calculates the joint angles and returns them as a tuple
@@ -88,7 +93,7 @@ class YuMiKinematics():
         return (lres,rres)
 
     def interpolate_cartesian_waypoints(self,l_waypoints=None,r_waypoints=None,
-            l_qinit=None,r_qinit=None):
+            l_qinit=None,r_qinit=None,N=20):
         '''
         Convenience function for chaining together a bunch of cartesian paths linearly
         makes successive calls to compute_cartesian_path
@@ -99,7 +104,7 @@ class YuMiKinematics():
             traj=[]
             for i in range(len(l_waypoints)-1):
                 p,_=self.compute_cartesian_path(l_start=l_waypoints[i],l_goal=l_waypoints[i+1],
-                        l_qinit=l_qinit)
+                        l_qinit=l_qinit,N=N)
                 traj+=p
                 l_qinit=traj[-1]
             lres=traj
@@ -107,7 +112,7 @@ class YuMiKinematics():
             traj=[]
             for i in range(len(r_waypoints)-1):
                 _,p=self.compute_cartesian_path(r_start=r_waypoints[i],r_goal=r_waypoints[i+1],
-                        r_qinit=r_qinit)
+                        r_qinit=r_qinit,N=N)
                 traj+=p
                 r_qinit=traj[-1]
             rres=traj
@@ -124,13 +129,13 @@ class YuMiKinematics():
         joint_traj=[]
         q_manip=solvers["Manipulation1"].ik(waypoints[0].matrix, qinit)
         if qinit is None or np.max(np.abs(q_manip-qinit))>jump_thresh:
-            joint_traj.append(solvers["Distance"].ik(waypoints[0].matrix, qinit))
+            joint_traj.append(solvers["Speed"].ik(waypoints[0].matrix, qinit))
         else:
             joint_traj.append(q_manip)
-        #then do the rest of the traj using distance
+        #then do the rest of the traj using faster solver
         for i in range(1,len(waypoints)):
             m = waypoints[i].matrix
-            joint_traj.append(solvers["Distance"].ik(m,joint_traj[-1]))
+            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1]))
         return joint_traj
 
     def check_jumps(self,joint_traj,jump_thresh):
