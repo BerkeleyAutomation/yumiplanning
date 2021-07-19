@@ -3,14 +3,6 @@ from autolab_core import RigidTransform
 import numpy as np
 
 class YuMiKinematics():
-    #these states are high manipulability configurations with elbows up and out,
-    #and grippers facing perpendicularly down
-    L_NICE_STATE=np.deg2rad(np.array([-71.52785377, -62.91241387, 61.09700753, 17.98294573,
-             108.93368164,  75.65987325, 139.55185761]))
-    R_NICE_STATE=np.array([ 1.21442839, -1.03205606, -1.10072738,  0.2987352,  
-             -1.85257716,  1.25363652,-2.42181893])
-    L_NICE_POSE = RigidTransform(translation=(.5,.2,.256),rotation=[0,1,0,0],from_frame='gripper_l_base',to_frame='base_link')
-    R_NICE_POSE = RigidTransform(translation=(.5,-.2,.256),rotation=[0,1,0,0],from_frame='gripper_l_base',to_frame='base_link')
     #these are the names of frames in RigidTransforms
     base_frame="base_link"
     #tip frame is the end of the urdf file, in this case meaning the wrist
@@ -19,6 +11,17 @@ class YuMiKinematics():
     #tcp is tool center point, meaning the point ik and fk will compute to
     l_tcp_frame="l_tcp"
     r_tcp_frame="r_tcp"
+    #these states are high manipulability configurations with elbows up and out,
+    #and grippers facing perpendicularly down
+    L_NICE_STATE=np.deg2rad(np.array([-71.52785377, -62.91241387, 61.09700753, 17.98294573,
+             108.93368164,  75.65987325, 139.55185761]))
+    R_NICE_STATE=np.array([ 1.21442839, -1.03205606, -1.10072738,  0.2987352,  
+             -1.85257716,  1.25363652,-2.42181893])
+    L_NICE_POSE = RigidTransform(translation=(.5,.2,.256),rotation=[0,1,0,0],
+        from_frame=l_tip_frame,to_frame=base_frame)
+    R_NICE_POSE = RigidTransform(translation=(.5,-.2,.256),rotation=[0,1,0,0],
+        from_frame=r_tip_frame,to_frame=base_frame)
+    
     
     def __init__(self):
         '''
@@ -50,15 +53,16 @@ class YuMiKinematics():
         if l_tool is None:
             self.l_tcp = RigidTransform(from_frame=self.l_tcp_frame,to_frame=self.l_tip_frame)
         else:
-            assert(l_tool.from_frame == self.l_tcp_frame,l_tool.to_frame == self.l_tip_frame)
+            assert l_tool.from_frame == self.l_tcp_frame,l_tool.to_frame == self.l_tip_frame
             self.l_tcp = l_tool
         if r_tool is None:
             self.r_tcp = RigidTransform(from_frame=self.r_tcp_frame,to_frame=self.r_tip_frame)
         else:
-            assert(r_tool.from_frame == self.r_tcp_frame, r_tool.to_frame == self.r_tip_frame)
+            assert r_tool.from_frame == self.r_tcp_frame, r_tool.to_frame == self.r_tip_frame
             self.r_tcp = r_tool
 
-    def ik(self, left_pose=None, right_pose=None, left_qinit=None, right_qinit=None, solve_type="Speed"):
+    def ik(self, left_pose=None, right_pose=None, left_qinit=None, right_qinit=None, solve_type="Speed",
+            bs=[1e-5,1e-5,1e-5,  1e-3,1e-3,1e-3]):
         '''
         given left and/or right target poses, calculates the joint angles and returns them as a tuple
         poses are RigidTransforms, qinits are np arrays
@@ -69,10 +73,12 @@ class YuMiKinematics():
         rres=None
         if left_pose is not None:
             left_pose = left_pose*self.l_tcp.inverse()
-            lres=self.left_solvers[solve_type].ik(left_pose.matrix,left_qinit)
+            lres=self.left_solvers[solve_type].ik(left_pose.matrix,left_qinit,
+                    bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
         if right_pose is not None:
             right_pose = right_pose*self.r_tcp.inverse()
-            rres=self.right_solvers[solve_type].ik(right_pose.matrix,right_qinit)
+            rres=self.right_solvers[solve_type].ik(right_pose.matrix,right_qinit,
+                    bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
         return (lres,rres)
 
     def fk(self, qleft=None, qright=None):
@@ -91,6 +97,16 @@ class YuMiKinematics():
             rres = RigidTransform(translation=rpos[:3,3],rotation=rpos[:3,:3],from_frame=self.r_tip_frame,to_frame=self.base_frame)*self.r_tcp
         return (lres,rres)
 
+    def refine_state(self,l_state=None,r_state=None,t_tol=.05,r_tol=.5):
+        '''
+        attempts to find a configuration that the robot can move to without
+        deviating from its current position more than t_tol in translation and r_tol in orientation
+        '''
+        #technique 1: try linearly interpolating in joint space to desired config, and if the pose doesn't leave the bounds, return it. Test 
+        #successively tighter joint limits 
+        #TODO
+        pass
+
     def compute_cartesian_path(self,l_start=None,l_goal=None,l_qinit=None,r_start=None,r_goal=None,r_qinit=None,
             N=10,jump_thresh=.3):
         '''
@@ -99,6 +115,9 @@ class YuMiKinematics():
         N is the mnumber of points to use when interpolating
         If no qinit is specified, the solver won't necessarily produce a close solution, so there may be
         a large motion to get to the first waypoint in the path
+        
+        mid_tol and end_tol give tolerances on deviation from middle waypoints and final waypoint
+        the first coordinate is translational deviation, and second is rotational deviation
         '''
         #NOTE: assumes given poses are in the l_tcp and r_tcp frames
         lres=None
@@ -208,12 +227,10 @@ class YuMiKinematics():
 
 if __name__=="__main__":
     yk = YuMiKinematics()
-    ltarget=RigidTransform(translation=[.5,.2,.1],rotation=[0,1,0,0],from_frame="l_tcp")
-    rtarget=RigidTransform(translation=[.5,-.2,.1],rotation=[0,1,0,0],from_frame="r_tcp")
-    lq,rq = yk.ik(ltarget,rtarget,left_qinit=YuMiKinematics.L_NICE_STATE,right_qinit=YuMiKinematics.R_NICE_STATE)
-    print("joints without tcp:",lq)
+    ltarget=RigidTransform(translation=[.5,.2,.05],rotation=[0,1,0,0],from_frame="l_tcp")
+    rtarget=RigidTransform(translation=[.5,-.2,.05],rotation=[0,1,0,0],from_frame="r_tcp")
     yk.set_tcp(RigidTransform(translation=[0,0,.156],from_frame="l_tcp",to_frame=yk.l_tip_frame),RigidTransform(translation=[0,0,.156],from_frame="r_tcp",to_frame=yk.r_tip_frame))
-    lq,rq = yk.ik(ltarget,rtarget,left_qinit=YuMiKinematics.L_NICE_STATE,right_qinit=YuMiKinematics.R_NICE_STATE)
+    lq,rq = yk.ik(ltarget,rtarget,left_qinit=YuMiKinematics.L_NICE_STATE,right_qinit=YuMiKinematics.R_NICE_STATE,
+            bs=[1e-3,1e-3,1e-3, .2,.2,.2])
     lp,rp = yk.fk(lq,rq)
-    print("joints with tcp:",lq)
     print(lp.translation,lp.quaternion)
