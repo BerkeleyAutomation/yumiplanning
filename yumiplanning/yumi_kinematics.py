@@ -2,6 +2,13 @@ from tracikpy import TracIKSolver
 from autolab_core import RigidTransform
 import numpy as np
 
+def quat_dist(q1,q2):
+    ret=np.arccos(min(1,max(-1,2*np.power(q1.dot(q2),2.0)-1)))
+    return ret
+def pick(tup):
+    '''convenience for picking the non-None value in a 2-tuple
+    '''
+    return tup[1-tup.index(None)]
 class YuMiKinematics():
     #these are the names of frames in RigidTransforms
     base_frame="base_link"
@@ -17,6 +24,7 @@ class YuMiKinematics():
              108.93368164,  75.65987325, 139.55185761]))
     R_NICE_STATE=np.array([ 1.21442839, -1.03205606, -1.10072738,  0.2987352,  
              -1.85257716,  1.25363652,-2.42181893])
+    #these poses for the wrists (not tcp)
     L_NICE_POSE = RigidTransform(translation=(.5,.2,.256),rotation=[0,1,0,0],
         from_frame=l_tip_frame,to_frame=base_frame)
     R_NICE_POSE = RigidTransform(translation=(.5,-.2,.256),rotation=[0,1,0,0],
@@ -31,8 +39,7 @@ class YuMiKinematics():
         urdf_path = os.path.dirname(os.path.abspath(__file__)) + "/../yumi_description/urdf/yumi.urdf"
         
         #setup the tool center point as 0 transform
-        self.l_tcp = RigidTransform(from_frame=self.l_tcp_frame,to_frame=self.l_tip_frame)
-        self.r_tcp = RigidTransform(from_frame=self.r_tcp_frame,to_frame=self.r_tip_frame)
+        self.set_tcp(None,None)
         '''taken from tracik:
         Speed: returns very quickly the first solution found
         % Distance: runs for the full timeout_in_secs, then returns the solution that minimizes SSE from the seed
@@ -48,6 +55,7 @@ class YuMiKinematics():
         self.right_solvers["Distance"]= TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Distance")
         self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Manipulation1")
         self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Speed")
+        self.solvers={"left":self.left_solvers,"right":self.right_solvers}
 
     def set_tcp(self,l_tool=None,r_tool=None):
         if l_tool is None:
@@ -66,7 +74,8 @@ class YuMiKinematics():
         '''
         given left and/or right target poses, calculates the joint angles and returns them as a tuple
         poses are RigidTransforms, qinits are np arrays
-        solve_type can be "Distance" or "Manipulation1" (See constructor for what these mean)
+        solve_type can be "Distance" or "Manipulation1" or "Speed" (See constructor for what these mean)
+        bs is an array representing the tolerance on end pose of the gripper
         '''
         #NOTE: assumes given poses are in the l_tcp and r_tcp frames
         lres=None
@@ -90,10 +99,10 @@ class YuMiKinematics():
         lres=None
         rres=None
         if qleft is not None:
-            lpos = self.left_solvers["Distance"].fk(qleft)
+            lpos = self.left_solvers["Speed"].fk(qleft)
             lres = RigidTransform(translation=lpos[:3,3],rotation=lpos[:3,:3],from_frame=self.l_tip_frame,to_frame=self.base_frame)*self.l_tcp
         if qright is not None:
-            rpos = self.right_solvers["Distance"].fk(qright)
+            rpos = self.right_solvers["Speed"].fk(qright)
             rres = RigidTransform(translation=rpos[:3,3],rotation=rpos[:3,:3],from_frame=self.r_tip_frame,to_frame=self.base_frame)*self.r_tcp
         return (lres,rres)
 
@@ -102,13 +111,39 @@ class YuMiKinematics():
         attempts to find a configuration that the robot can move to without
         deviating from its current position more than t_tol in translation and r_tol in orientation
         '''
-        #technique 1: try linearly interpolating in joint space to desired config, and if the pose doesn't leave the bounds, return it. Test 
-        #successively tighter joint limits 
-        #TODO
-        pass
+        #technique 1: try linearly interpolating in joint space to desired config, and if the pose doesn't leave the bounds, return it.
+        l_pos,r_pos = self.fk(l_state,r_state)
+        l_des,r_des = self.ik(l_pos,r_pos,l_state,r_state,"Manipulation1")
+        lres=[]
+        rres=[]
+        if l_state is not None:
+            traj = np.linspace(l_state,l_des,20)
+            tdev,rdev = self.max_deviation(traj,l_pos,"qleft")
+            if(tdev<t_tol and rdev<r_tol):
+                lres = traj
+        if r_state is not None:
+            traj = np.linspace(r_state,r_des,20)
+            tdev,rdev = self.max_deviation(traj,r_pos,"qright")
+            if(tdev<t_tol and rdev<r_tol):
+                rres = traj
+        return lres,rres
+
+    def max_deviation(self,traj,pose,arm_name):
+        '''
+        finds the maximum deviation (meters,radians) of the tcp from the given pose
+        arm_name is "qleft" or "qright"
+        '''
+        tmax=0
+        rmax=0
+        for q in traj:
+            r = self.fk(**{arm_name:q})
+            p = pick(r)
+            tmax = max(np.linalg.norm(p.translation-pose.translation),tmax)
+            rmax = max(quat_dist(p.quaternion,pose.quaternion),rmax)
+        return tmax,rmax
 
     def compute_cartesian_path(self,l_start=None,l_goal=None,l_qinit=None,r_start=None,r_goal=None,r_qinit=None,
-            N=10,jump_thresh=.3):
+            N=10,jump_thresh=.4):
         '''
         Returns a traj interpolated linearly in cartesian space along the path between start and end
         all poses should be RigidTransform objects
@@ -120,8 +155,8 @@ class YuMiKinematics():
         the first coordinate is translational deviation, and second is rotational deviation
         '''
         #NOTE: assumes given poses are in the l_tcp and r_tcp frames
-        lres=None
-        rres=None
+        lres=[]
+        rres=[]
         if(l_start is not None and l_goal is not None):
            l_start = l_start*self.l_tcp.inverse()
            l_goal = l_goal*self.l_tcp.inverse()
@@ -147,9 +182,9 @@ class YuMiKinematics():
         makes successive calls to compute_cartesian_path
         '''
         #NOTE: assumes given poses are in the l_tcp and r_tcp frames
-        lres=None
-        rres=None
-        if l_waypoints is not None:
+        lres=[]
+        rres=[]
+        if l_waypoints is not None and len(l_waypoints)>1:
             traj=[]
             for i in range(len(l_waypoints)-1):
                 p,_=self.compute_cartesian_path(l_start=l_waypoints[i],l_goal=l_waypoints[i+1],
@@ -157,7 +192,7 @@ class YuMiKinematics():
                 traj+=p
                 l_qinit=traj[-1]
             lres=traj
-        if r_waypoints is not None:
+        if r_waypoints is not None and len(r_waypoints)>1:
             traj=[]
             for i in range(len(r_waypoints)-1):
                 _,p=self.compute_cartesian_path(r_start=r_waypoints[i],r_goal=r_waypoints[i+1],
@@ -196,9 +231,12 @@ class YuMiKinematics():
         tmp = joint_traj[0]
         jmps=False
         for i in range(1,len(joint_traj)): 
-            diff=np.max(abs(joint_traj[i]-tmp))
+            diffvec=abs(joint_traj[i]-tmp)
+            diff=np.max(diffvec)
             if diff>jump_thresh:
                 print("Jump of magnitude",diff,"found")
+                if(np.max(diffvec[0:4])>jump_thresh):
+                    raise Exception("Jump in first 4 joints, aborting")
                 jmps=True
             tmp=joint_traj[i]
         return jmps
@@ -224,13 +262,109 @@ class YuMiKinematics():
         qnew[2]=q[6]
         qnew[3:7]=q[2:6]
         return qnew
+    @staticmethod
+    def yumi_format_2_urdf(q):
+        return np.deg2rad(YuMiKinematics.yumi_order_2_urdf(q))
+
+    @staticmethod
+    def urdf_format_2_yumi(q):
+        return np.rad2deg(YuMiKinematics.urdf_order_2_yumi(q))
 
 if __name__=="__main__":
-    yk = YuMiKinematics()
-    ltarget=RigidTransform(translation=[.5,.2,.05],rotation=[0,1,0,0],from_frame="l_tcp")
-    rtarget=RigidTransform(translation=[.5,-.2,.05],rotation=[0,1,0,0],from_frame="r_tcp")
-    yk.set_tcp(RigidTransform(translation=[0,0,.156],from_frame="l_tcp",to_frame=yk.l_tip_frame),RigidTransform(translation=[0,0,.156],from_frame="r_tcp",to_frame=yk.r_tip_frame))
-    lq,rq = yk.ik(ltarget,rtarget,left_qinit=YuMiKinematics.L_NICE_STATE,right_qinit=YuMiKinematics.R_NICE_STATE,
-            bs=[1e-3,1e-3,1e-3, .2,.2,.2])
-    lp,rp = yk.fk(lq,rq)
-    print(lp.translation,lp.quaternion)
+    pass
+'''
+
+<JointInfos>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="1"/>
+<Link Value="1"/>
+<Twist Value="0"/>
+<Length Value="0"/>
+<Rotation Value="0"/>
+<Offset Value="0"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="2"/>
+<Link Value="2"/>
+<Twist Value="1.57079632679558"/>
+<Length Value="0.0300000000000276"/>
+<Rotation Value="3.14159265358979"/>
+<Offset Value="1.51574274386155E-13"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="3"/>
+<Link Value="3"/>
+<Twist Value="1.57079632679569"/>
+<Length Value="0.0299999999999672"/>
+<Rotation Value="0"/>
+<Offset Value="0.251499999999955"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="4"/>
+<Link Value="4"/>
+<Twist Value="-1.57079632679535"/>
+<Length Value="0.0404999999999989"/>
+<Rotation Value="-1.57079632679452"/>
+<Offset Value="-8.95329360786013E-14"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="5"/>
+<Link Value="5"/>
+<Twist Value="-1.57079632679503"/>
+<Length Value="0.0405000000001106"/>
+<Rotation Value="3.14159265358979"/>
+<Offset Value="0.264999999999955"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="6"/>
+<Link Value="6"/>
+<Twist Value="-1.57079632679442"/>
+<Length Value="0.0269999999999218"/>
+<Rotation Value="3.14159265358979"/>
+<Offset Value="-4.95470001989013E-14"/>
+</Element>
+</DHParameters>
+</Element>
+<Element type="TJointInfo">
+<IsRevoluteJoint Value="true"/>
+<DHParameters>
+<Element type="TDHParameters">
+<NextJoint Value="-1"/>
+<Link Value="7"/>
+<Twist Value="-1.5707963267943"/>
+<Length Value="0.0269999999998913"/>
+<Rotation Value="0"/>
+<Offset Value="1.90227280103862E-17"/>
+</Element>
+</DHParameters>
+</Element>
+</JointInfos>
+'''
