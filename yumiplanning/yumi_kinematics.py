@@ -218,9 +218,11 @@ class YuMiKinematics():
         else:
             joint_traj.append(q_manip)
         #then do the rest of the traj using faster solver
-        for i in range(1,len(waypoints)):
+        for i in range(1,len(waypoints)-1):
             m = waypoints[i].matrix
-            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1]))
+            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1],brx=.1,bry=.1,brz=.1))
+        m = waypoints[-1].matrix
+        joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1]))
         return joint_traj
 
     def check_jumps(self,joint_traj,jump_thresh):
