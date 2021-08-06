@@ -56,6 +56,8 @@ class YuMiKinematics():
         self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Manipulation1")
         self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Speed")
         self.solvers={"left":self.left_solvers,"right":self.right_solvers}
+        self.left_joint_lims=self.left_solvers["Speed"].joint_limits
+        self.right_joint_lims=self.right_solvers["Speed"].joint_limits
 
     def set_tcp(self,l_tool=None,r_tool=None):
         if l_tool is None:
@@ -143,7 +145,7 @@ class YuMiKinematics():
         return tmax,rmax
 
     def compute_cartesian_path(self,l_start=None,l_goal=None,l_qinit=None,r_start=None,r_goal=None,r_qinit=None,
-            N=10,jump_thresh=.4):
+            N=20,jump_thresh=.4):
         '''
         Returns a traj interpolated linearly in cartesian space along the path between start and end
         all poses should be RigidTransform objects
