@@ -14,20 +14,35 @@ namespace YuMiPlanning{
 
 typedef fcl::BVHModel<fcl::OBBRSS> Model;
 typedef std::shared_ptr<fcl::CollisionObject> ColObjPtr;
-typedef std::shared_ptr<const urdf::Link> LinkPtr;
+typedef std::shared_ptr<urdf::Link> LinkPtr;
+
 class CollisionChecker{
 public:
-    CollisionChecker(urdf::Model robot_model):robot_model(robot_model){
+    CollisionChecker(std::string desc_path){
+        robot_model.initFile(desc_path+"/urdf/yumi.urdf");\
         if (!kdl_parser::treeFromUrdfModel(robot_model, tree)){
             std::cerr << "Failed to extract kdl tree from xml robot description\n";
         }
-        //1. parse through and load the mesh files into fcl
+        std::vector<LinkPtr> links;
+        robot_model.getLinks(links);
+        for(auto l:links){
+            if(l->collision!=nullptr){
+                //need to load in the mesh for this
+                std::string frame_name = l->name;
+                if(l->collision->geometry->type==urdf::Geometry::MESH){
+                    auto mesh = std::static_pointer_cast<urdf::Mesh>(l->collision->geometry);
+                    int i=mesh->filename.find("meshes");
+                    std::string stlfilename = desc_path + mesh->filename.substr(i);
+                    ColObjPtr obj = loadMesh(stlfilename);
+                    objects[frame_name] = obj;
+                }
+            }
+        }
     }
     /*
         Returns true if the arm is colliding with itself (for now doesn't include inter-arm collisions)
     */
     bool isColliding(std::vector<double> l_joints,std::vector<double> r_joints){
-        
         return isColliding(l_joints,L_TIP) || isColliding(r_joints,R_TIP);
     }
     bool isColliding(std::vector<double>joints, std::string tip_frame){
@@ -111,10 +126,9 @@ private:
 };
 }
 int main(){
-    urdf::Model robot_model;
-    robot_model.initFile("/home/jkerr/yumi/yumiplanning/yumi_description/urdf/yumi.urdf");\
-    YuMiPlanning::CollisionChecker checker(robot_model);
+    YuMiPlanning::CollisionChecker checker("/home/jkerr/yumi/yumiplanning/yumi_description/");
     std::vector<double> zero(7,0.0);
-    checker.isColliding(zero,checker.L_TIP);
+    bool collides = checker.isColliding(zero,zero);
+    std::cout<<collides<<std::endl;
     return 0;
 }
