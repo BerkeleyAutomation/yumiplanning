@@ -19,6 +19,8 @@
 #include "stl_reader.h"
 #include <unordered_map>
 #include <functional>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace YuMiPlanning{
 
@@ -122,7 +124,7 @@ public:
         }
         for(int obj1=0;obj1<objsToCheck.size();obj1++){
             for(int obj2=0;obj2<objsToCheck.size();obj2++){
-                if(obj1-obj2<=1 && obj1-obj2>=-1 || (obj1>=5 && obj2>=5))continue;//skip neighbor links
+                if((obj1-obj2<=1 && obj1-obj2>=-1) || (obj1>=5 && obj2>=5))continue;//skip neighbor links
                 fcl::CollisionRequest req;
                 fcl::CollisionResult res;
                 fcl::collide(objsToCheck[obj1].get(),objsToCheck[obj2].get(),req,res);
@@ -357,8 +359,16 @@ private:
     return state;
 }
 };
-
 }//end namespace
+namespace py=pybind11;
+PYBIND11_MODULE(yumiplanning_ompl,m){
+    py::class_<YuMiPlanning::CollisionChecker>(m,"CollisionChecker")
+        .def(py::init<const std::string &>(),"Provide the urdf path");
+    py::class_<YuMiPlanning::DualArmPlanner>(m,"DualArmPlanner")
+        .def(py::init<YuMiPlanning::CollisionChecker>(),"Provide a constructed CollisionChecker")
+        .def("planPath",&YuMiPlanning::DualArmPlanner::planPath,"Test for planning");
+}
+
 int main(){
     YuMiPlanning::CollisionChecker checker("/home/jkerr/yumi/yumiplanning/yumi_description/");
     // YuMiPlanning::SingleArmPlanner planner(checker,true,true);
