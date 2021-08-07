@@ -3,7 +3,7 @@ try:
 except:
     print("\nCouldn't import ompl planner!\nMake sure you have built the yumi ompl planner in yumiplanning/ompl_planner\n")
 '''
-To use this class, make sure you build
+To use this class, make sure you build the planner in the ompl_planner folder. see README
 '''
 import numpy as np
 class Planner:
