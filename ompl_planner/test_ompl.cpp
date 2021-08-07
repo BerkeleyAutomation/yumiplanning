@@ -4,6 +4,7 @@
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/base/ScopedState.h>
 #include <ompl/geometric/planners/rrt/RRTstar.h>
+#include <ompl/geometric/planners/rrt/RRTConnect.h>
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl_parser/kdl_parser.hpp>
 #include <string>
@@ -43,8 +44,6 @@ public:
                     int i=mesh->filename.find("meshes");
                     std::string stlfilename = desc_path + mesh->filename.substr(i);
                     ColObjPtr obj = loadMesh(stlfilename);
-                    std::string *userdat = new std::string(frame_name);
-                    obj->setUserData((void*)userdat);//TODO free this data
                     objects[frame_name] = obj;
                 }
             }
@@ -64,25 +63,20 @@ public:
         setupManager(l_manager,L_TIP);
         setupManager(r_manager,R_TIP);
     }
-    void getLeftJointLims(std::vector<double> &lower,std::vector<double> &upper){
-        lower.clear();
-        upper.clear();
-        for(auto j:l_joints){
-            lower.push_back(j->limits->lower);
-            upper.push_back(j->limits->upper);
+    void getLeftJointLims(double *lower,double *upper){
+        for(int i=0;i<7;i++){
+            lower[i]=l_joints[i]->limits->lower;
+            upper[i]=l_joints[i]->limits->upper;
         }
     }
-    void getRightJointLims(std::vector<double> &lower,std::vector<double> &upper){
-        lower.clear();
-        upper.clear();
-        for(auto j:r_joints){
-            lower.push_back(j->limits->lower);
-            upper.push_back(j->limits->upper);
+    void getRightJointLims(double *lower,double *upper){
+        for(int i=0;i<7;i++){
+            lower[i]=r_joints[i]->limits->lower;
+            upper[i]=r_joints[i]->limits->upper;
         }
     }
     /*
         Returns true if the arm is colliding with itself 
-        //TODO add inter-arm collisions
     */
     bool isColliding(std::vector<double> l_joints, std::vector<double> r_joints){
         //IMPORTANT: the intercollision must happen after both isColliding, because that sets the transforms for all the objects
@@ -95,10 +89,6 @@ public:
         int collision=0;
         auto blank_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat){
             int *col=(int*)dat;
-            // std::string *name1=(std::string*)o1->getUserData();
-            // std::string *name2=(std::string*)o2->getUserData();
-            // fcl::Vec3f t1=o1->getTranslation();
-            // fcl::Vec3f t2=o2->getTranslation();
             fcl::CollisionRequest req;
             fcl::CollisionResult res;
             fcl::collide(o1,o2,req,res);
@@ -204,9 +194,7 @@ private:
         jointvec is a 7-vector. this function downfilters it into the correct number and computes forward kin
         */
         KDL::Chain chain;
-        if(!tree.getChain("base_link",frame_name,chain)){
-            std::cerr<<"couldn't find link in tree\n";
-        }
+        tree.getChain(BASE,frame_name,chain);
         KDL::ChainFkSolverPos_recursive solver(chain);
         unsigned int nJoints = chain.getNrOfJoints();
         KDL::JntArray kdlJ(nJoints);
@@ -231,35 +219,92 @@ public:
         left specifies whether this plans for left or right arm, use_other specifies whether to plan
         around the other arm (false means ignore collisions with the other arm)
     */
-    SingleArmValidity(ompl::base::SpaceInformationPtr si, CollisionChecker checker, bool left, bool use_other):
-                colChecker(checker),left(left),use_other(use_other){
-
-    }
+    SingleArmValidity(CollisionChecker checker, bool left):colChecker(checker),left(left){}
     void setOther(std::vector<double> &new_other){
         other_q = new_other;
     }
-    bool isValid(const ompl::base::State *state){
+    bool isValidSingle(const ompl::base::State *state){
         auto q = state->as<ompl::base::RealVectorStateSpace::StateType>();
         std::vector<double> cur_q(7);
         for(int i=0;i<7;i++)cur_q[i] = (*q)[i];
-        if(use_other){
-            if(left){
-                return !colChecker.isColliding(cur_q,other_q);
-            }else{
-                return !colChecker.isColliding(other_q,cur_q);
-            }
+        if(left){
+            return !colChecker.isColliding(cur_q,colChecker.L_TIP);
         }else{
-            if(left){
-                return !colChecker.isColliding(cur_q,colChecker.L_TIP);
-            }else{
-                return !colChecker.isColliding(cur_q,colChecker.R_TIP);
-            }
+            return !colChecker.isColliding(cur_q,colChecker.R_TIP);
+        }
+    }
+    bool isValidOther(const ompl::base::State *state){
+        auto q = state->as<ompl::base::RealVectorStateSpace::StateType>();
+        std::vector<double> cur_q(7);
+        for(int i=0;i<7;i++)cur_q[i] = (*q)[i];
+        if(left){
+            return !colChecker.isColliding(cur_q,other_q);
+        }else{
+            return !colChecker.isColliding(other_q,cur_q);
         }
     }
 private:
     CollisionChecker colChecker;
-    bool left,use_other;
+    bool left;
     std::vector<double> other_q;
+};
+class DualArmValidity{
+public:
+    DualArmValidity(CollisionChecker checker):colChecker(checker){}
+    bool isValid(const ompl::base::State *state){
+        auto q = state->as<ompl::base::RealVectorStateSpace::StateType>();
+        std::vector<double> q_l(7);
+        std::vector<double> q_r(7);
+        for(int i=0;i<7;i++)q_l[i] = (*q)[i];
+        for(int i=0;i<7;i++)q_r[i] = (*q)[i+7];
+        return !colChecker.isColliding(q_l,q_r);
+    }
+private:
+    CollisionChecker colChecker;
+};
+class DualArmPlanner{
+public:
+    DualArmPlanner(CollisionChecker checker){
+        //initialize the state space
+        ompl::base::StateSpacePtr space(new ompl::base::RealVectorStateSpace(14));
+        ompl::base::RealVectorBounds bounds(14);
+        checker.getLeftJointLims(bounds.low.data(),bounds.high.data());
+        checker.getRightJointLims(bounds.low.data()+7,bounds.high.data()+7);
+        space->as<ompl::base::RealVectorStateSpace>()->setBounds(bounds);
+        //use simplesetup to make a planner
+        setup = ompl::geometric::SimpleSetupPtr(new ompl::geometric::SimpleSetup(space));
+        validity=std::make_shared<DualArmValidity>(checker);
+        std::function<bool(const ompl::base::State*)> fun;
+        fun=std::bind<bool>(&DualArmValidity::isValid,validity,std::placeholders::_1);
+        setup->setStateValidityChecker(fun);
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.004);//This is fraction of state space, not radians
+        ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
+        planner->as<ompl::geometric::RRTConnect>()->setRange(.05);
+        setup->setPlanner(planner);
+    }
+    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout=5){
+        //execute the solve
+        auto start=getState(s,setup);
+        auto goal=getState(g,setup);
+        setup->setStartAndGoalStates(start,goal);
+        setup->solve(timeout);
+        setup->simplifySolution();
+        if(setup->haveSolutionPath()){
+            return setup->getSolutionPath();
+        }
+        return ompl::geometric::PathGeometric(setup->getSpaceInformation());
+    }
+private:
+    ompl::geometric::SimpleSetupPtr setup;
+    std::shared_ptr<DualArmValidity> validity;
+    ompl::base::ScopedState<ompl::base::RealVectorStateSpace> getState(std::vector<double> q,
+                                    ompl::geometric::SimpleSetupPtr setup){
+        ompl::base::ScopedState<ompl::base::RealVectorStateSpace> state(setup->getSpaceInformation());
+        for(int i=0;i<14;i++){
+            state[i]=q[i];
+        }
+        return state;
+    }
 };
 class SingleArmPlanner{
 public:
@@ -267,31 +312,36 @@ public:
         //initialize the state space
         ompl::base::StateSpacePtr space(new ompl::base::RealVectorStateSpace(7));
         ompl::base::RealVectorBounds bounds(7);
-        checker.getLeftJointLims(bounds.low,bounds.high);
+        checker.getLeftJointLims(bounds.low.data(),bounds.high.data());
         space->as<ompl::base::RealVectorStateSpace>()->setBounds(bounds);
         //use simplesetup to make a planner
         setup = ompl::geometric::SimpleSetupPtr(new ompl::geometric::SimpleSetup(space));
-        validity=std::make_shared<SingleArmValidity>(setup->getSpaceInformation(),checker,left,use_other);
-        std::function<bool(const ompl::base::State*)> fun=std::bind<bool>(&SingleArmValidity::isValid,validity,std::placeholders::_1);
+        validity=std::make_shared<SingleArmValidity>(checker,left);
+        std::function<bool(const ompl::base::State*)> fun;
+        if(use_other){
+            fun=std::bind<bool>(&SingleArmValidity::isValidOther,validity,std::placeholders::_1);
+        }else{
+            fun=std::bind<bool>(&SingleArmValidity::isValidSingle,validity,std::placeholders::_1);
+        }
         setup->setStateValidityChecker(fun);
-        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.001);
-        ompl::base::PlannerPtr planner(new ompl::geometric::RRTstar(setup->getSpaceInformation()));
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.004);//This is fraction of state space, not radians
+        ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
+        planner->as<ompl::geometric::RRTConnect>()->setRange(.05);
         setup->setPlanner(planner);
     }
     ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,std::vector<double> other){
         validity->setOther(other);
         return planPath(s,g);
     }
-    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g){
+    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout=2){
         //execute the solve
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
         setup->setStartAndGoalStates(start,goal);
-        setup->solve(1);
-        // setup->simplifySolution();
+        setup->solve(timeout);
+        setup->simplifySolution();
         if(setup->haveSolutionPath()){
-            ompl::geometric::PathGeometric path = setup->getSolutionPath();
-            return path;
+            return setup->getSolutionPath();
         }
         return ompl::geometric::PathGeometric(setup->getSpaceInformation());
     }
@@ -311,15 +361,23 @@ private:
 }//end namespace
 int main(){
     YuMiPlanning::CollisionChecker checker("/home/jkerr/yumi/yumiplanning/yumi_description/");
-    YuMiPlanning::SingleArmPlanner planner(checker,true,true);
-    std::vector<double> s={1.7886884440180186, -0.44371156619454205, -1.7481374222057635, -0.40361105137018755, 0.16508589386459488, 1.1032037623419368, -0.1919595195294482};
-    std::vector<double> g ={1.7889450395890478, 0.5727117937361313, -0.1202846167553847, 1.105436756336941, -0.8347407460212457, -0.9100656608720741, -0.17140514236767576};
-    std::vector<double> other_q(7,0);
-    ompl::geometric::PathGeometric path = planner.planPath(s,g,other_q);
+    // YuMiPlanning::SingleArmPlanner planner(checker,true,true);
+    // std::vector<double> s={1.7886884440180186, -0.44371156619454205, -1.7481374222057635, -0.40361105137018755, 0.16508589386459488, 1.1032037623419368, -0.1919595195294482};
+    // std::vector<double> g ={1.7889450395890478, 0.5727117937361313, -0.1202846167553847, 1.105436756336941, -0.8347407460212457, -0.9100656608720741, -0.17140514236767576};
+    // std::vector<double> other_q(7,0);
+    // ompl::geometric::PathGeometric path = planner.planPath(s,g,other_q);
+
+    YuMiPlanning::DualArmPlanner planner(checker);
+    std::vector<double> s={1.7886884440180186, -0.44371156619454205, -1.7481374222057635, -0.40361105137018755, 0.16508589386459488, 1.1032037623419368, -0.1919595195294482,
+                            0,0,0,0,0,0,0};
+    std::vector<double> g={1.7889450395890478, 0.5727117937361313, -0.1202846167553847, 1.105436756336941, -0.8347407460212457, -0.9100656608720741, -0.17140514236767576,
+                            0,0,0,0,0,0,0};
+    ompl::geometric::PathGeometric path = planner.planPath(s,g);
     if(!path.check()){
         std::cerr<<"Failed to plan path\n";
         return 1;
     }
+    std::cout<<"Path cost: "<<path.length()<<std::endl;
     path.print(std::cout);
     return 0;
 }
