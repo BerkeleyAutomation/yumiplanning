@@ -4,10 +4,14 @@
 #include "dual_arm.h"
 #include "single_arm.h"
 namespace py=pybind11;
+
 PYBIND11_MODULE(yumiplanning_ompl,m){
     py::class_<YuMiPlanning::CollisionChecker>(m,"CollisionChecker")
         .def(py::init<const std::string &>(),"Provide the urdf path");
     py::class_<YuMiPlanning::DualArmPlanner>(m,"DualArmPlanner")
         .def(py::init<YuMiPlanning::CollisionChecker>(),"Provide a constructed CollisionChecker")
-        .def("planPath",&YuMiPlanning::DualArmPlanner::planPath,"Test for planning");
+        .def("planPath",&YuMiPlanning::DualArmPlanner::planPathPy,"Test for planning");
+    py::class_<YuMiPlanning::SingleArmPlanner>(m,"SingleArmPlanner")
+        .def(py::init<YuMiPlanning::CollisionChecker, bool,bool>(),"Provide a constructed CollisionChecker")
+        .def("planPath",&YuMiPlanning::SingleArmPlanner::planPathPy,"Test for planning");
 }

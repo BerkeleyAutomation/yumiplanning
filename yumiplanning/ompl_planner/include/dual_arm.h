@@ -41,7 +41,7 @@ public:
         planner->as<ompl::geometric::RRTConnect>()->setRange(.05);
         setup->setPlanner(planner);
     }
-    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout=5){
+    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout){
         //execute the solve
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
@@ -49,9 +49,21 @@ public:
         setup->solve(timeout);
         setup->simplifySolution();
         if(setup->haveSolutionPath()){
+            std::cout<<"Solution cost "<<setup->getSolutionPath().length()<<std::endl;
             return setup->getSolutionPath();
         }
         return ompl::geometric::PathGeometric(setup->getSpaceInformation());
+    }
+    std::vector<std::vector<double> > planPathPy(std::vector<double> s,std::vector<double>g,double timeout){
+        //execute the solve
+        ompl::geometric::PathGeometric path=planPath(s,g,timeout);
+        std::vector<std::vector<double> > res;
+        for(int s=0;s<path.getStateCount();s++){
+            std::vector<double> q(14);
+            for(int i=0;i<14;i++)q[i] = (*(path.getState(s)->as<ompl::base::RealVectorStateSpace::StateType>()))[i];
+            res.push_back(q);
+        }
+        return res;
     }
 private:
     ompl::geometric::SimpleSetupPtr setup;
