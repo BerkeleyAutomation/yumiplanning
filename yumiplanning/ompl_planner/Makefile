@@ -1,5 +1,5 @@
 CC := g++
-FLAGS := -std=c++11 -O3 -Wall 
+FLAGS := -std=c++17 -O3  
 PYFLAGS := $(FLAGS) -shared
 $(eval PYINCLUDE= $(shell python3 -m pybind11 --includes))#magic to set the pybind include dirs
 $(eval PYEXT=$(shell python3-config --extension-suffix))

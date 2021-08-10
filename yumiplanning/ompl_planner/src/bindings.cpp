@@ -7,11 +7,12 @@ namespace py=pybind11;
 
 PYBIND11_MODULE(yumiplanning_ompl,m){
     py::class_<YuMiPlanning::CollisionChecker>(m,"CollisionChecker")
-        .def(py::init<const std::string &>(),"Provide the urdf path");
+        .def(py::init<const std::string &>(),"Provide the urdf path")
+	.def("isColliding",py::overload_cast<std::vector<double>,std::vector<double>>(&YuMiPlanning::CollisionChecker::isColliding),"Test for collision");
     py::class_<YuMiPlanning::DualArmPlanner>(m,"DualArmPlanner")
         .def(py::init<YuMiPlanning::CollisionChecker>(),"Provide a constructed CollisionChecker")
-        .def("planPath",&YuMiPlanning::DualArmPlanner::planPathPy,"Test for planning");
+        .def("planPath",&YuMiPlanning::DualArmPlanner::planPathPy,"Plan a path");
     py::class_<YuMiPlanning::SingleArmPlanner>(m,"SingleArmPlanner")
         .def(py::init<YuMiPlanning::CollisionChecker, bool,bool>(),"Provide a constructed CollisionChecker")
-        .def("planPath",&YuMiPlanning::SingleArmPlanner::planPathPy,"Test for planning");
+        .def("planPath",&YuMiPlanning::SingleArmPlanner::planPathPy,"Plan a path");
 }
