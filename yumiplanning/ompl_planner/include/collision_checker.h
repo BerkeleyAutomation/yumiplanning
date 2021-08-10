@@ -43,9 +43,10 @@ public:
             }
         }
         //initialize the table object
-        double h=.5;
+        const double h=.5;
+        const double table_z=-.005;
         std::shared_ptr<fcl::Box> table=std::make_shared<fcl::Box>(2,2,.5);
-        fcl::Vec3f T(0,0,-h/2);
+        fcl::Vec3f T(0,0,-h/2 - table_z);
         tableObj = std::make_shared<fcl::CollisionObject>(table);
         tableObj->setTranslation(T);
         //initialize joints from urdf for bounds
@@ -75,11 +76,13 @@ public:
     bool isColliding(std::vector<double> l_joints, std::vector<double> r_joints){
         //IMPORTANT: the intercollision must happen after both isColliding, because that sets the transforms for all the objects
         //!!!!!!!!!!!!!!!!!!!!!!!!
-        return isColliding(l_joints,L_TIP) || isColliding(r_joints,R_TIP) || interCollision();
-    }
-    bool interCollision(){
+        bool intraarm = isColliding(l_joints,L_TIP) || isColliding(r_joints,R_TIP); 
+        if(intraarm)return true;
         l_manager->update();
         r_manager->update();
+        return tableCollision() || interCollision();
+    }
+    bool interCollision(){
         int collision=0;
         auto col_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat){
             int *col=(int*)dat;
@@ -89,18 +92,6 @@ public:
             if(res.isCollision())*col=1;
             return res.isCollision();
         };
-        // auto dist_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat,double &d){
-        //     int *col=(int*)dat;
-        //     fcl::DistanceRequest req;
-        //     fcl::DistanceResult res;
-        //     fcl::distance(o1,o2,req,res);
-        //     if(res.min_distance<.02){
-        //         *col=1;
-        //         return true;
-        //     }
-        //     return false;
-        // };
-        // l_manager->distance(r_manager.get(),&collision,dist_cb);
         l_manager->collide(r_manager.get(),&collision,col_cb);
         return collision==1;
     }
@@ -138,11 +129,7 @@ public:
                 }
             }
         }
-        //check last object collision with table
-        fcl::CollisionRequest req;
-        fcl::CollisionResult res;
-        fcl::collide(objsToCheck[objsToCheck.size()-1].get(),tableObj.get(),req,res);
-        return res.isCollision();
+        return false;
     }
     const std::string L_TIP = "gripper_l_finger_l";//TODO ideally gripper collisions would be approximated as a larger box
     const std::string R_TIP = "gripper_r_finger_r";
@@ -173,6 +160,24 @@ private:
         }
         return js;
     }
+
+    bool tableCollision(){
+        //return true if the arms collide with the table
+        int collision=0;
+        auto col_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat){
+            int *col=(int*)dat;
+            fcl::CollisionRequest req;
+            fcl::CollisionResult res;
+            fcl::collide(o1,o2,req,res);
+            if(res.isCollision())*col=1;
+            return res.isCollision();
+        };
+        l_manager->collide(tableObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        r_manager->collide(tableObj.get(),&collision,col_cb);
+        return collision==1;
+    }
+
     ColObjPtr loadMesh(std::string filename){
         std::vector<fcl::Triangle> tris;
         std::vector<fcl::Vec3f> verts;

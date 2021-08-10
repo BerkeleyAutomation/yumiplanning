@@ -44,7 +44,6 @@ class Planner:
         '''
         Returns path(s) from the start location to goal poses
         '''
-        #TODO
         pass
 
     def is_valid_state(self,l_q,r_q):
