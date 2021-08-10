@@ -60,7 +60,7 @@ public:
             fun=std::bind<bool>(&SingleArmValidity::isValidSingle,validity,std::placeholders::_1);
         }
         setup->setStateValidityChecker(fun);
-        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.003);//This is fraction of state space, not radians
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.002);//This is fraction of state space, not radians
         ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
         planner->as<ompl::geometric::RRTConnect>()->setRange(.1);
         setup->setPlanner(planner);

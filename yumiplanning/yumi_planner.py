@@ -44,6 +44,7 @@ class Planner:
         '''
         Returns path(s) from the start location to goal poses
         '''
+        #TODO
         pass
 
     def is_valid_state(self,l_q,r_q):
@@ -61,6 +62,8 @@ if __name__=='__main__':
     from yumirws.yumi import YuMi
     from yumiplanning.yumi_kinematics import YuMiKinematics as YK
     y=YuMi()
+    y.left.close_gripper()
+    y.right.close_gripper()
     planner=Planner()
     l_start=y.left.get_joints()
     r_start=y.right.get_joints()
@@ -73,6 +76,6 @@ if __name__=='__main__':
     # y.right.sync()
     #plan both and move in sync
     l_path,r_path=planner.plan(l_start,r_start,l_goal,r_goal,1)
-    y.move_joints_sync(l_path,r_path,speed=(.1,2))
+    y.move_joints_sync(l_path,r_path,speed=(.3,2))
     y.left.sync()
     y.right.sync()

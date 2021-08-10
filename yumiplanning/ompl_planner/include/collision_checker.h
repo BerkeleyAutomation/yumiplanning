@@ -219,7 +219,7 @@ private:
     std::shared_ptr<fcl::DynamicAABBTreeCollisionManager> l_manager,r_manager;
     std::vector<urdf::JointSharedPtr> l_joints;
     std::vector<urdf::JointSharedPtr> r_joints;
-    const double INFLATE=1.03;
+    const double INFLATE=1.11;
     //all link meshes are slightly blown up to give the yumi controller enough buffer
 };
 }
