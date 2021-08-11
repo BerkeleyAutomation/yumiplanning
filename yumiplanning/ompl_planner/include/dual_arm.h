@@ -36,7 +36,7 @@ public:
         std::function<bool(const ompl::base::State*)> fun;
         fun=std::bind<bool>(&DualArmValidity::isValid,validity,std::placeholders::_1);
         setup->setStateValidityChecker(fun);
-        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.002);//This is fraction of state space, not radians
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.003);//This is fraction of state space, not radians
         ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
         planner->as<ompl::geometric::RRTConnect>()->setRange(.1);
         setup->setPlanner(planner);
@@ -45,6 +45,7 @@ public:
         //execute the solve
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
+        setup->clear();
         setup->setStartAndGoalStates(start,goal);
         setup->solve(timeout);
         setup->simplifySolution();

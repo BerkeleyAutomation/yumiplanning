@@ -44,9 +44,9 @@ public:
         }
         //initialize the table object
         const double h=.5;
-        const double table_z=-.005;
+        const double table_z=0.02;
         std::shared_ptr<fcl::Box> table=std::make_shared<fcl::Box>(2,2,.5);
-        fcl::Vec3f T(0,0,-h/2 - table_z);
+        fcl::Vec3f T(0,0,-h/2 + table_z);
         tableObj = std::make_shared<fcl::CollisionObject>(table);
         tableObj->setTranslation(T);
         //initialize joints from urdf for bounds
