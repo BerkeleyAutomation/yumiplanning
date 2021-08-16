@@ -11,6 +11,7 @@ import numpy as np
 class PlanningException(Exception):
     def __init__(self, *args, **kwargs):
         Exception.__init__(self, *args, **kwargs)
+
 class Planner:
     def __init__(self):
         import os
@@ -39,11 +40,11 @@ class Planner:
         if l_goal is not None:
             path=self.left.planPath(l_start,l_goal,r_start,timeout)
             if len(path)==0:raise PlanningException("Couldn't plan path")
-            return np.array(path)
+            return np.array(path),[]
         if r_goal is not None:
             path=self.right.planPath(r_start,r_goal,l_start,timeout)
             if len(path)==0:raise PlanningException("Couldn't plan path")
-            return np.array(path)
+            return [],np.array(path)
 
     def plan_to_pose(self,l_start_q, r_start_q, yk, l_goal_p=None, r_goal_p=None):
         '''
@@ -56,29 +57,27 @@ class Planner:
             if r_goal_p is None:rsol=r_start_q
             if lsol is None or rsol is None:return False
             return self.is_valid_state(lsol,rsol)
-        l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,l_start_q,r_start_q,"Speed")
+        def round(q):
+            return np.round(q,4) if q is not None else None
+        l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,l_start_q,r_start_q,"Distance")
+        #TODO confirm if this rounding actually matters
+        l_goal,r_goal=round(l_goal),round(r_goal)
         if not isvalidiksol(l_goal,r_goal):
-            for i in range(50):
-                print("trying goal states")
+            for i in range(100):
+                print("yumi_planner.py: Trying random goal config")
                 #try randomly a few times to see if we find one that doesn't collide
                 l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,None,None,"Speed")
+                l_goal,r_goal=round(l_goal),round(r_goal)
                 if isvalidiksol(l_goal,r_goal):
                     break
         if not isvalidiksol(l_goal,r_goal):raise PlanningException("Couldn't find valid goal states to reach goal poses")
         return self.plan(l_start_q,r_start_q,l_goal,r_goal)
 
     def is_valid_state(self,l_q,r_q):
-        return not self.coll.isColliding(l_q,r_q)
+        return self.coll.isInBounds(l_q,r_q) and not self.coll.isColliding(l_q,r_q)
 
 if __name__=='__main__':
-    # s=np.zeros(14)
-    # g=np.zeros(14)
-    # s[:7]=[1.7886884440180186, -0.44371156619454205, -1.7481374222057635, -0.40361105137018755, 0.16508589386459488, 1.1032037623419368, -0.1919595195294482]
-    # g[:7]=[1.7889450395890478, 0.5727117937361313, -0.1202846167553847, 1.105436756336941, -0.8347407460212457, -0.9100656608720741, -0.17140514236767576]
-    # planner=Planner()
-    # l_path,r_path=planner.plan(s[:7],s[7:],g[:7],g[7:])
-    # print(l_path,r_path)
-
+    planner=Planner()
     from yumirws.yumi import YuMi
     from yumiplanning.yumi_kinematics import YuMiKinematics as YK
     import time

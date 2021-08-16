@@ -60,7 +60,7 @@ public:
             fun=std::bind<bool>(&SingleArmValidity::isValidSingle,validity,std::placeholders::_1);
         }
         setup->setStateValidityChecker(fun);
-        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.003);//This is fraction of state space, not radians
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.004);//This is fraction of state space, not radians
         ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
         planner->as<ompl::geometric::RRTConnect>()->setRange(.1);
         setup->setPlanner(planner);
@@ -70,14 +70,25 @@ public:
         return planPath(s,g,timeout);
     }
     ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout){
+        //TODO make sure start,goal are within bounds and account for floating point error
         //execute the solve
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
         setup->clear();
-        setup->setStartAndGoalStates(start,goal);
-        setup->solve(timeout);
+        setup->setStartState(start);
+        setup->setGoalState(goal);
+        ompl::base::PlannerData dat(setup->getSpaceInformation());
+        while(true){
+            setup->solve(timeout);
+            setup->getPlanner()->as<ompl::geometric::RRTConnect>()->getPlannerData(dat);
+            if(dat.getGoalIndex(0) != ompl::base::PlannerData::INVALID_INDEX){
+                break;
+            }
+            setup->clear();
+            std::cout<<"You can safely ignore the above error message\n";
+        }
         setup->simplifySolution();
-        if(setup->haveSolutionPath()){
+        if(setup->haveExactSolutionPath()){
             std::cout<<"Solution cost "<<setup->getSolutionPath().length()<<std::endl;
             return setup->getSolutionPath();
         }
@@ -100,8 +111,9 @@ private:
     ompl::base::ScopedState<ompl::base::RealVectorStateSpace> getState(std::vector<double> q,
                                     ompl::geometric::SimpleSetupPtr setup){
         ompl::base::ScopedState<ompl::base::RealVectorStateSpace> state(setup->getSpaceInformation());
+        const ompl::base::RealVectorBounds &bounds = setup->getStateSpace()->as<ompl::base::RealVectorStateSpace>()->getBounds();
         for(int i=0;i<7;i++){
-            state[i]=q[i];
+            state[i]=std::min(std::max(q[i],bounds.low[i]),bounds.high[i]);
         }
         return state;
     }

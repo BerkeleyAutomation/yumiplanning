@@ -14,6 +14,7 @@
 #include "stl_reader.h"
 #include <unordered_map>
 #include <functional>
+#include <limits>
 namespace YuMiPlanning{
 
 typedef fcl::BVHModel<fcl::OBBRSS> Model;
@@ -44,11 +45,19 @@ public:
         }
         //initialize the table object
         const double h=.5;
-        const double table_z=0.02;
+        const double table_z=0.07;
         std::shared_ptr<fcl::Box> table=std::make_shared<fcl::Box>(2,2,.5);
-        fcl::Vec3f T(0,0,-h/2 + table_z);
+        fcl::Vec3f tableT(0,0,-h/2 + table_z);
         tableObj = std::make_shared<fcl::CollisionObject>(table);
-        tableObj->setTranslation(T);
+        tableObj->setTranslation(tableT);
+        //initialize the camera object
+        double wx=.2;
+        double wy=.31;
+        double wz=.2;
+        std::shared_ptr<fcl::Box> cam=std::make_shared<fcl::Box>(wx,wy,wz);
+        fcl::Vec3f camT(0.318598, -0.087999, 0.826867+wz/2);
+        camObj = std::make_shared<fcl::CollisionObject>(cam);
+        camObj->setTranslation(camT);
         //initialize joints from urdf for bounds
         l_joints=getJoints(L_TIP);
         r_joints=getJoints(R_TIP);
@@ -80,7 +89,25 @@ public:
         if(intraarm)return true;
         l_manager->update();
         r_manager->update();
-        return tableCollision() || interCollision();
+        return environCollision() || interCollision();
+    }
+    bool isInBounds(std::vector<double> l_joints, std::vector<double> r_joints){
+        //mostly only from python side to sample configs
+        std::vector<double> l(7);
+        std::vector<double> u(7);
+        getLeftJointLims(l.data(),u.data());
+        for(int i=0;i<7;i++){
+            if(l_joints[i]<l[i] || l_joints[i]>u[i]){
+                return false;
+            }
+        }
+        getRightJointLims(l.data(),u.data());
+        for(int i=0;i<7;i++){
+            if(r_joints[i]<l[i] || r_joints[i]>u[i]){
+                return false;
+            }
+        }
+        return true;
     }
     bool interCollision(){
         int collision=0;
@@ -161,8 +188,8 @@ private:
         return js;
     }
 
-    bool tableCollision(){
-        //return true if the arms collide with the table
+    bool environCollision(){
+        //return true if the arms collide with the table (or camera)
         int collision=0;
         auto col_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat){
             int *col=(int*)dat;
@@ -175,6 +202,10 @@ private:
         l_manager->collide(tableObj.get(),&collision,col_cb);
         if(collision==1)return true;
         r_manager->collide(tableObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        l_manager->collide(camObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        r_manager->collide(camObj.get(),&collision,col_cb);
         return collision==1;
     }
 
@@ -220,7 +251,7 @@ private:
     KDL::Tree tree;
     urdf::Model robot_model;
     std::unordered_map<std::string,ColObjPtr> objects;//dict that keeps track of all the loaded meshes
-    ColObjPtr tableObj;
+    ColObjPtr tableObj,camObj;
     std::shared_ptr<fcl::DynamicAABBTreeCollisionManager> l_manager,r_manager;
     std::vector<urdf::JointSharedPtr> l_joints;
     std::vector<urdf::JointSharedPtr> r_joints;
