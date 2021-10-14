@@ -50,28 +50,38 @@ class Planner:
         '''
         Returns path(s) from the start location to goal poses
         '''
-        if not(isinstance(yk,YuMiKinematics)):
-            raise Exception("plan_to_pose must be given a YuMiKinematics object")
+        l_goal,r_goal=self.find_joints(l_start_q,r_start_q,yk,200,l_goal_p,r_goal_p)
+        if l_goal is None and r_goal is None:
+            return None #raise PlanningException("Couldn't find valid goal states to reach goal poses")
+        return self.plan(l_start_q,r_start_q,l_goal,r_goal)
+
+    def find_joints(self,l_start_q,r_start_q,yk,samples,l_goal_p=None,r_goal_p=None):
         def isvalidiksol(lsol,rsol):
             if l_goal_p is None:lsol=l_start_q
             if r_goal_p is None:rsol=r_start_q
             if lsol is None or rsol is None:return False
-            return self.is_valid_state(lsol,rsol)
-        def round(q):
-            return np.round(q,4) if q is not None else None
-        l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,l_start_q,r_start_q,"Distance")
-        #TODO confirm if this rounding actually matters
-        l_goal,r_goal=round(l_goal),round(r_goal)
-        if not isvalidiksol(l_goal,r_goal):
-            for i in range(100):
-                print("yumi_planner.py: Trying random goal config")
+            # print(f"inbounds {self.coll.isInBounds(lsol,rsol)}")
+            # print(f"Colliding {self.coll.isColliding(lsol,rsol)}")
+            return not self.coll.isColliding(lsol,rsol)
+        if l_start_q is not None or r_start_q is not None:
+            l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,l_start_q,r_start_q,"Distance")
+            unseeded=False
+        else:
+            unseeded=True
+        fixedsamples=[(np.zeros(7),np.zeros(7))]
+        if unseeded or not isvalidiksol(l_goal,r_goal):
+            for i in range(samples):
                 #try randomly a few times to see if we find one that doesn't collide
-                l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,None,None,"Speed")
-                l_goal,r_goal=round(l_goal),round(r_goal)
+                if i<len(fixedsamples):
+                    li,ri = fixedsamples[i]
+                else:
+                    li = np.random.uniform(yk.left_joint_lims[0],yk.left_joint_lims[1])
+                    ri = np.random.uniform(yk.right_joint_lims[0],yk.right_joint_lims[1])
+                l_goal,r_goal = yk.ik(l_goal_p,r_goal_p,li,ri,"Speed")
                 if isvalidiksol(l_goal,r_goal):
                     break
-        if not isvalidiksol(l_goal,r_goal):raise PlanningException("Couldn't find valid goal states to reach goal poses")
-        return self.plan(l_start_q,r_start_q,l_goal,r_goal)
+        if not isvalidiksol(l_goal,r_goal):return None,None
+        return l_goal,r_goal
 
     def is_valid_state(self,l_q,r_q):
         return self.coll.isInBounds(l_q,r_q) and not self.coll.isColliding(l_q,r_q)

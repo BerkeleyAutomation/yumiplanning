@@ -9,6 +9,7 @@ def pick(tup):
     '''convenience for picking the non-None value in a 2-tuple
     '''
     return tup[1-tup.index(None)]
+
 class YuMiKinematics():
     #these are the names of frames in RigidTransforms
     base_frame="base_link"
@@ -45,17 +46,23 @@ class YuMiKinematics():
         % Distance: runs for the full timeout_in_secs, then returns the solution that minimizes SSE from the seed
         % Manipulation1: runs for full timeout, returns solution that maximizes sqrt(det(J*J^T)) (the product of the singular values of the Jacobian)
         % Manipulation2: runs for full timeout, returns solution that minimizes the ratio of min to max singular values of the Jacobian.
-'''
+        '''
         self.left_solvers={}
         self.left_solvers["Distance"]=TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Distance")
         self.left_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Manipulation1")
-        self.left_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Speed")
+        self.left_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.01,solve_type="Speed")
 
         self.right_solvers={}
         self.right_solvers["Distance"]= TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Distance")
         self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Manipulation1")
-        self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Speed")
+        self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.01,solve_type="Speed")
         self.solvers={"left":self.left_solvers,"right":self.right_solvers}
+        for s in list(self.left_solvers.values()) + list(self.right_solvers.values()):
+            # I edit these values to make sure that the IK solution is never on the boundary, otherwise the internal state checker in
+            # ompl might complain about an invalid state (untested whether this is actually the case, but it doesn't hurt to nudge
+            # these values and it might fix things so why not)
+            jmin,jmax = s.joint_limits
+            s.joint_limits=jmin + 1e-5,jmax - 1e-5
         self.left_joint_lims=self.left_solvers["Speed"].joint_limits
         self.right_joint_lims=self.right_solvers["Speed"].joint_limits
 
@@ -82,12 +89,19 @@ class YuMiKinematics():
         #NOTE: assumes given poses are in the l_tcp and r_tcp frames
         lres=None
         rres=None
+        
         if left_pose is not None:
             left_pose = left_pose*self.l_tcp.inverse()
+            jmin,jmax=self.left_solvers[solve_type].joint_limits
+            if left_qinit is not None:
+                left_qinit=np.clip(left_qinit,jmin,jmax)
             lres=self.left_solvers[solve_type].ik(left_pose.matrix,left_qinit,
                     bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
         if right_pose is not None:
             right_pose = right_pose*self.r_tcp.inverse()
+            jmin,jmax=self.right_solvers[solve_type].joint_limits
+            if right_qinit is not None:
+                right_qinit=np.clip(right_qinit,jmin,jmax)
             rres=self.right_solvers[solve_type].ik(right_pose.matrix,right_qinit,
                     bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
         return (lres,rres)
@@ -161,9 +175,9 @@ class YuMiKinematics():
         rres=[]
         if(l_start is not None and l_goal is not None):
            l_start = l_start*self.l_tcp.inverse()
-           l_goal = l_goal*self.l_tcp.inverse()
+           l_goal  = l_goal*self.l_tcp.inverse()
            waypoints = l_start.linear_trajectory_to(l_goal,N)
-           joint_traj = self.compute_traj(self.left_solvers,waypoints,jump_thresh,l_qinit)
+           joint_traj = self.compute_traj(self.left_solvers,waypoints[1:],jump_thresh,l_qinit)
            if self.check_jumps(joint_traj,jump_thresh):
                print("Warning: jump detected in left traj")
            lres = joint_traj
@@ -171,7 +185,7 @@ class YuMiKinematics():
             r_start = r_start*self.r_tcp.inverse()
             r_goal = r_goal*self.r_tcp.inverse()
             waypoints = r_start.linear_trajectory_to(r_goal,N)
-            joint_traj = self.compute_traj(self.right_solvers,waypoints,jump_thresh,r_qinit)
+            joint_traj = self.compute_traj(self.right_solvers,waypoints[1:],jump_thresh,r_qinit)
             if self.check_jumps(joint_traj,jump_thresh):
                print("Warning: jump detected in right traj")
             rres=joint_traj
@@ -206,23 +220,20 @@ class YuMiKinematics():
 
     def compute_traj(self, solvers, waypoints, jump_thresh,qinit=None):
         '''
-        Calculates the IK for each pose in waypoints, attempting to use Manipulation1 when possible and 
-        defaulting to Distance when movement exceeds the jump_thresh
+        Calculates the IK for each pose in waypoints
         solvers=either self.left_solvers or self.right_solvers
         waypoints=list of RigidTransform
         jump_thresh=describes the max allowed distance between joint configs
         '''
         joint_traj=[]
+        if qinit is not None:
+            jmin,jmax=solvers['Speed'].joint_limits
+            qinit=np.clip(qinit,jmin,jmax)
         #this call doesn't include the tcp because waypoints must already be in the gripper_{l,r}_base frame
-        q_manip=solvers["Manipulation1"].ik(waypoints[0].matrix, qinit)
-        if qinit is None or np.max(np.abs(q_manip-qinit))>jump_thresh:
-            joint_traj.append(solvers["Speed"].ik(waypoints[0].matrix, qinit))
-        else:
-            joint_traj.append(q_manip)
-        #then do the rest of the traj using faster solver
+        joint_traj.append(solvers["Speed"].ik(waypoints[0].matrix,qinit,bx=.001,by=.001,bz=.001,brx=.2,bry=.2,brz=.2))
         for i in range(1,len(waypoints)-1):
             m = waypoints[i].matrix
-            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1],brx=.1,bry=.1,brz=.1))
+            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1],bx=.001,by=.001,bz=.001,brx=.2,bry=.2,brz=.2))
         m = waypoints[-1].matrix
         joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1]))
         return joint_traj
@@ -238,7 +249,7 @@ class YuMiKinematics():
             diffvec=abs(joint_traj[i]-tmp)
             diff=np.max(diffvec)
             if diff>jump_thresh:
-                print("Jump of magnitude",diff,"found")
+                print(f"Jump of magnitude {diff} found in joint {np.argmax(diffvec)}")
                 if(np.max(diffvec[0:4])>jump_thresh):
                     raise Exception("Jump in first 4 joints, aborting")
                 jmps=True
@@ -249,7 +260,7 @@ class YuMiKinematics():
     For some ungodly reason, yumi doesn't format the joint data in order of physical joint
     the actual order is [1,2,4,5,6,7,3]
     meaning the 3rd physical joint appears last in the data array xD
-    these functions convert between physical (urdf, used with IK) and yumi (for sending commands)
+    these functions convert between physical (urdf, used with IK) and yumi
     '''
     @staticmethod
     def urdf_order_2_yumi(q):
@@ -277,6 +288,7 @@ class YuMiKinematics():
 if __name__=="__main__":
     pass
 '''
+DH parameters taken from yumi file in abb robostudio
 
 <JointInfos>
 <Element type="TJointInfo">

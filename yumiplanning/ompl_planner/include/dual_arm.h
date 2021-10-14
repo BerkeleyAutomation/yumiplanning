@@ -49,7 +49,8 @@ public:
         setup->setStartState(start);
         setup->setGoalState(goal);
         ompl::base::PlannerData dat(setup->getSpaceInformation());
-        while(true){
+	    int tries=0;
+        while(tries++<4){
             setup->solve(timeout);
             setup->getPlanner()->as<ompl::geometric::RRTConnect>()->getPlannerData(dat);
             if(dat.getGoalIndex(0) != ompl::base::PlannerData::INVALID_INDEX){
