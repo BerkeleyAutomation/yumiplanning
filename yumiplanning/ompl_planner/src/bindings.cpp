@@ -8,7 +8,7 @@ namespace py=pybind11;
 PYBIND11_MODULE(yumiplanning_ompl,m){
     py::class_<YuMiPlanning::CollisionChecker>(m,"CollisionChecker")
         .def(py::init<const std::string &>(),"Provide the urdf path")
-	.def("isColliding",py::overload_cast<std::vector<double>,std::vector<double>>(&YuMiPlanning::CollisionChecker::isColliding),"Test for collision")
+	.def("isColliding",py::overload_cast<std::vector<double>,std::vector<double>,double>(&YuMiPlanning::CollisionChecker::isColliding),"Test for collision")
     .def("isInBounds",&YuMiPlanning::CollisionChecker::isInBounds,"check that a state is in bounds of urdf joint lims");
     py::class_<YuMiPlanning::DualArmPlanner>(m,"DualArmPlanner")
         .def(py::init<YuMiPlanning::CollisionChecker>(),"Provide a constructed CollisionChecker")

@@ -45,7 +45,7 @@ private:
     bool left;
     std::vector<double> other_q;
 };
-typedef ompl::geometric::RRTConnect planner_t;
+typedef ompl::geometric::PRM planner_t;
 
 class SingleArmPlanner{
 public:
@@ -67,7 +67,6 @@ public:
         setup->setStateValidityChecker(fun);
         setup->getSpaceInformation()->setStateValidityCheckingResolution(0.005);//This is fraction of state space, not radians
         ompl::base::PlannerPtr planner(new planner_t(setup->getSpaceInformation()));
-        planner->as<planner_t>()->setRange(.4);
         setup->setPlanner(planner);
     }
     ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,std::vector<double> other,double timeout){
@@ -79,11 +78,10 @@ public:
         //execute the solve
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
-        setup->clear();
         setup->setStartState(start);
         setup->setGoalState(goal);
         ompl::base::PlannerData dat(setup->getSpaceInformation());
-        int tries=0;
+	int tries=0;
         while(tries++<4){
             setup->solve(timeout);
             setup->getPlanner()->as<planner_t>()->getPlannerData(dat);

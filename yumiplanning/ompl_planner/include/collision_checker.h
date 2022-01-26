@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <functional>
 #include <limits>
+#include <pthread.h>
 namespace YuMiPlanning{
 
 typedef fcl::BVHModel<fcl::OBBRSS> Model;
@@ -44,20 +45,23 @@ public:
             }
         }
         //initialize the table object
-        const double h=.5;
-        const double table_z=-0.02;
-        std::shared_ptr<fcl::Box> table=std::make_shared<fcl::Box>(2,2,.5);
-        fcl::Vec3f tableT(0,0,-h/2 + table_z);
+        std::shared_ptr<fcl::Box> table=std::make_shared<fcl::Box>(2,2,table_h);
         tableObj = std::make_shared<fcl::CollisionObject>(table);
-        tableObj->setTranslation(tableT);
         //initialize the camera object
         double wx=.2;
-        double wy=.31;
-        double wz=.2;
+        double wy=.4;
+        double wz=.3;
         std::shared_ptr<fcl::Box> cam=std::make_shared<fcl::Box>(wx,wy,wz);
-        fcl::Vec3f camT(0.318598, -0.087999, 0.826867+wz/2);
+        fcl::Vec3f camT(0.318598, -0.087999, 1+wz/2);
         camObj = std::make_shared<fcl::CollisionObject>(cam);
         camObj->setTranslation(camT);
+        //initialize the left bar object
+        std::shared_ptr<fcl::Box> pillar_box=std::make_shared<fcl::Box>(.04,.04,3);
+        leftPillarObj = std::make_shared<fcl::CollisionObject>(pillar_box);
+        leftPillarObj->setTranslation(fcl::Vec3f(-.03,-.45,0));
+        //initialize the right bar object
+        rightPillarObj = std::make_shared<fcl::CollisionObject>(pillar_box);
+        rightPillarObj->setTranslation(fcl::Vec3f(-.03,.45,0));
         //initialize joints from urdf for bounds
         l_joints=getJoints(L_TIP);
         r_joints=getJoints(R_TIP);
@@ -82,14 +86,14 @@ public:
     /*
         Returns true if the arm is colliding with itself 
     */
-    bool isColliding(std::vector<double> l_joints, std::vector<double> r_joints){
+    bool isColliding(std::vector<double> l_joints, std::vector<double> r_joints,double table_z=.02){
         //IMPORTANT: the intercollision must happen after both isColliding, because that sets the transforms for all the objects
         //!!!!!!!!!!!!!!!!!!!!!!!!
         bool intraarm = isColliding(l_joints,L_TIP) || isColliding(r_joints,R_TIP); 
         if(intraarm)return true;
         l_manager->update();
         r_manager->update();
-        return environCollision() || interCollision();
+        return environCollision(table_z) || interCollision();
     }
     bool isInBounds(std::vector<double> l_joints, std::vector<double> r_joints){
         //mostly only from python side to sample configs
@@ -144,12 +148,13 @@ public:
                 objsToCheck.push_back(o);
             }
         }
-        for(int obj1=0;obj1<objsToCheck.size();obj1++){
-            for(int obj2=0;obj2<objsToCheck.size();obj2++){
-                if((obj1-obj2<=1 && obj1-obj2>=-1) || (obj1>=5 && obj2>=5))continue;
-                //skip neighbor links and links that are past the wrist (these are impossible to collide)
-                fcl::CollisionRequest req;
-                fcl::CollisionResult res;
+        for(int obj1=0;obj1<5;obj1++){
+            //skip links that are past the wrist (these are impossible to collide)
+            fcl::CollisionRequest req;
+            fcl::CollisionResult res;
+            for(int obj2=0;obj2<5;obj2++){
+                if(std::abs(obj1-obj2)<=1)continue;
+                //skip neighbor links
                 fcl::collide(objsToCheck[obj1].get(),objsToCheck[obj2].get(),req,res);
                 if(res.isCollision()){
                     return true;
@@ -161,6 +166,7 @@ public:
     const std::string L_TIP = "gripper_l_finger_l";//TODO ideally gripper collisions would be approximated as a larger box
     const std::string R_TIP = "gripper_r_finger_r";
     const std::string BASE = "base_link";
+    double table_h=.5;
 private:
     void setupManager(std::shared_ptr<fcl::BroadPhaseCollisionManager> man, std::string tip_frame){
         KDL::Chain chain;
@@ -188,8 +194,10 @@ private:
         return js;
     }
 
-    bool environCollision(){
+    bool environCollision(float table_z){
         //return true if the arms collide with the table (or camera)
+        fcl::Vec3f tableT(0,0,-table_h/2 + table_z);
+        tableObj->setTranslation(tableT);
         int collision=0;
         auto col_cb = [](fcl::CollisionObject *o1,fcl::CollisionObject *o2, void* dat){
             int *col=(int*)dat;
@@ -199,13 +207,25 @@ private:
             if(res.isCollision())*col=1;
             return res.isCollision();
         };
+        //table
         l_manager->collide(tableObj.get(),&collision,col_cb);
         if(collision==1)return true;
         r_manager->collide(tableObj.get(),&collision,col_cb);
         if(collision==1)return true;
+        //camera
         l_manager->collide(camObj.get(),&collision,col_cb);
         if(collision==1)return true;
         r_manager->collide(camObj.get(),&collision,col_cb);
+        //left pillar
+        l_manager->collide(leftPillarObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        r_manager->collide(leftPillarObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        //right pillar
+        l_manager->collide(rightPillarObj.get(),&collision,col_cb);
+        if(collision==1)return true;
+        r_manager->collide(rightPillarObj.get(),&collision,col_cb);
+        if(collision==1)return true;
         return collision==1;
     }
 
@@ -236,10 +256,15 @@ private:
         /*
         jointvec is a 7-vector. this function downfilters it into the correct number and computes forward kin
         */
-        KDL::Chain chain;
-        tree.getChain(BASE,frame_name,chain);
+        if(solvers.find(frame_name)==solvers.end()){
+            KDL::Chain chain;
+            tree.getChain(BASE,frame_name,chain);  
+            solvers.insert({frame_name,chain});
+        }
+        auto chain_iter = solvers.find(frame_name);
+        KDL::Chain chain = chain_iter->second;
+        unsigned int nJoints=chain.getNrOfJoints();
         KDL::ChainFkSolverPos_recursive solver(chain);
-        unsigned int nJoints = chain.getNrOfJoints();
         KDL::JntArray kdlJ(nJoints);
         for(int i=0;i<nJoints;i++){
             kdlJ(i) = jointvec[i];
@@ -251,11 +276,13 @@ private:
     KDL::Tree tree;
     urdf::Model robot_model;
     std::unordered_map<std::string,ColObjPtr> objects;//dict that keeps track of all the loaded meshes
-    ColObjPtr tableObj,camObj;
+    ColObjPtr tableObj,camObj,leftPillarObj,rightPillarObj;
     std::shared_ptr<fcl::DynamicAABBTreeCollisionManager> l_manager,r_manager;
     std::vector<urdf::JointSharedPtr> l_joints;
     std::vector<urdf::JointSharedPtr> r_joints;
-    const double INFLATE=1.11;
+    //map from frame name to (num joints,solver)
+    std::unordered_map<std::string,KDL::Chain> solvers;
+    const double INFLATE=1.11;//was 1.11
     //all link meshes are slightly blown up to give the yumi controller enough buffer
 };
 }

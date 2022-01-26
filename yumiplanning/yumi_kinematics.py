@@ -2,109 +2,121 @@ from tracikpy import TracIKSolver
 from autolab_core import RigidTransform
 import numpy as np
 
-def quat_dist(q1,q2):
-    ret=np.arccos(min(1,max(-1,2*np.power(q1.dot(q2),2.0)-1)))
+
+def quat_dist(q1, q2):
+    ret = np.arccos(min(1, max(-1, 2*np.power(q1.dot(q2), 2.0)-1)))
     return ret
+
+
 def pick(tup):
     '''convenience for picking the non-None value in a 2-tuple
     '''
     return tup[1-tup.index(None)]
 
+
 class YuMiKinematics():
-    #these are the names of frames in RigidTransforms
-    base_frame="base_link"
-    #tip frame is the end of the urdf file, in this case meaning the wrist
-    l_tip_frame="gripper_l_base"
-    r_tip_frame="gripper_r_base"
-    #tcp is tool center point, meaning the point ik and fk will compute to
-    l_tcp_frame="l_tcp"
-    r_tcp_frame="r_tcp"
-    #these states are high manipulability configurations with elbows up and out,
-    #and grippers facing perpendicularly down
-    L_NICE_STATE=np.deg2rad(np.array([-71.52785377, -62.91241387, 61.09700753, 17.98294573,
-             108.93368164,  75.65987325, 139.55185761]))
-    R_NICE_STATE=np.array([ 1.21442839, -1.03205606, -1.10072738,  0.2987352,  
-             -1.85257716,  1.25363652,-2.42181893])
-    #these poses for the wrists (not tcp)
-    L_NICE_POSE = RigidTransform(translation=(.5,.2,.256),rotation=[0,1,0,0],
-        from_frame=l_tip_frame,to_frame=base_frame)
-    R_NICE_POSE = RigidTransform(translation=(.5,-.2,.256),rotation=[0,1,0,0],
-        from_frame=r_tip_frame,to_frame=base_frame)
-    
-    
+    # these are the names of frames in RigidTransforms
+    base_frame = "base_link"
+    # tip frame is the end of the urdf file, in this case meaning the wrist
+    l_tip_frame = "gripper_l_base"
+    r_tip_frame = "gripper_r_base"
+    # tcp is tool center point, meaning the point ik and fk will compute to
+    l_tcp_frame = "l_tcp"
+    r_tcp_frame = "r_tcp"
+    # these states are high manipulability configurations with elbows up and out,
+    # and grippers facing perpendicularly down
+    L_NICE_STATE = np.deg2rad(np.array([-71.52785377, -62.91241387, 61.09700753, 17.98294573,
+                                        108.93368164,  75.65987325, 139.55185761]))
+    R_NICE_STATE = np.array([1.21442839, -1.03205606, -1.10072738,  0.2987352,
+                             -1.85257716,  1.25363652, -2.42181893])
+    # these poses for the wrists (not tcp)
+    L_NICE_POSE = RigidTransform(translation=(.5, .2, .256), rotation=[0, 1, 0, 0],
+                                 from_frame=l_tip_frame, to_frame=base_frame)
+    R_NICE_POSE = RigidTransform(translation=(.5, -.2, .256), rotation=[0, 1, 0, 0],
+                                 from_frame=r_tip_frame, to_frame=base_frame)
+
     def __init__(self):
         '''
         Initializes the kinematics with the urdf file
         '''
         import os
-        urdf_path = os.path.dirname(os.path.abspath(__file__)) + "/../yumi_description/urdf/yumi.urdf"
-        
-        #setup the tool center point as 0 transform
-        self.set_tcp(None,None)
+        urdf_path = os.path.dirname(os.path.abspath(
+            __file__)) + "/../yumi_description/urdf/yumi.urdf"
+
+        # setup the tool center point as 0 transform
+        self.set_tcp(None, None)
         '''taken from tracik:
         Speed: returns very quickly the first solution found
         % Distance: runs for the full timeout_in_secs, then returns the solution that minimizes SSE from the seed
         % Manipulation1: runs for full timeout, returns solution that maximizes sqrt(det(J*J^T)) (the product of the singular values of the Jacobian)
         % Manipulation2: runs for full timeout, returns solution that minimizes the ratio of min to max singular values of the Jacobian.
         '''
-        self.left_solvers={}
-        self.left_solvers["Distance"]=TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Distance")
-        self.left_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.05,solve_type="Manipulation1")
-        self.left_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.l_tip_frame,timeout=.01,solve_type="Speed")
+        self.left_solvers = {}
+        self.left_solvers["Distance"] = TracIKSolver(
+            urdf_path, self.base_frame, self.l_tip_frame, timeout=.04, solve_type="Distance")
+        self.left_solvers["Manipulation1"] = TracIKSolver(
+            urdf_path, self.base_frame, self.l_tip_frame, timeout=.05, solve_type="Manipulation1")
+        self.left_solvers["Speed"] = TracIKSolver(
+            urdf_path, self.base_frame, self.l_tip_frame, timeout=.02, solve_type="Speed")
 
-        self.right_solvers={}
-        self.right_solvers["Distance"]= TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Distance")
-        self.right_solvers["Manipulation1"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.05,solve_type="Manipulation1")
-        self.right_solvers["Speed"] = TracIKSolver(urdf_path,self.base_frame,self.r_tip_frame,timeout=.01,solve_type="Speed")
-        self.solvers={"left":self.left_solvers,"right":self.right_solvers}
+        self.right_solvers = {}
+        self.right_solvers["Distance"] = TracIKSolver(
+            urdf_path, self.base_frame, self.r_tip_frame, timeout=.04, solve_type="Distance")
+        self.right_solvers["Manipulation1"] = TracIKSolver(
+            urdf_path, self.base_frame, self.r_tip_frame, timeout=.05, solve_type="Manipulation1")
+        self.right_solvers["Speed"] = TracIKSolver(
+            urdf_path, self.base_frame, self.r_tip_frame, timeout=.02, solve_type="Speed")
+        self.solvers = {"left": self.left_solvers, "right": self.right_solvers}
         for s in list(self.left_solvers.values()) + list(self.right_solvers.values()):
             # I edit these values to make sure that the IK solution is never on the boundary, otherwise the internal state checker in
             # ompl might complain about an invalid state (untested whether this is actually the case, but it doesn't hurt to nudge
             # these values and it might fix things so why not)
-            jmin,jmax = s.joint_limits
-            s.joint_limits=jmin + 1e-5,jmax - 1e-5
-        self.left_joint_lims=self.left_solvers["Speed"].joint_limits
-        self.right_joint_lims=self.right_solvers["Speed"].joint_limits
+            jmin, jmax = s.joint_limits
+            s.joint_limits = jmin + 1e-5, jmax - 1e-5
+        self.left_joint_lims = self.left_solvers["Speed"].joint_limits
+        self.right_joint_lims = self.right_solvers["Speed"].joint_limits
 
-    def set_tcp(self,l_tool=None,r_tool=None):
+    def set_tcp(self, l_tool=None, r_tool=None):
         if l_tool is None:
-            self.l_tcp = RigidTransform(from_frame=self.l_tcp_frame,to_frame=self.l_tip_frame)
+            self.l_tcp = RigidTransform(
+                from_frame=self.l_tcp_frame, to_frame=self.l_tip_frame)
         else:
-            assert l_tool.from_frame == self.l_tcp_frame,l_tool.to_frame == self.l_tip_frame
+            assert l_tool.from_frame == self.l_tcp_frame, l_tool.to_frame == self.l_tip_frame
             self.l_tcp = l_tool
         if r_tool is None:
-            self.r_tcp = RigidTransform(from_frame=self.r_tcp_frame,to_frame=self.r_tip_frame)
+            self.r_tcp = RigidTransform(
+                from_frame=self.r_tcp_frame, to_frame=self.r_tip_frame)
         else:
             assert r_tool.from_frame == self.r_tcp_frame, r_tool.to_frame == self.r_tip_frame
             self.r_tcp = r_tool
 
     def ik(self, left_pose=None, right_pose=None, left_qinit=None, right_qinit=None, solve_type="Speed",
-            bs=[1e-5,1e-5,1e-5,  1e-3,1e-3,1e-3]):
+            bs=[1e-5, 1e-5, 1e-5,  1e-3, 1e-3, 1e-3]):
         '''
         given left and/or right target poses, calculates the joint angles and returns them as a tuple
         poses are RigidTransforms, qinits are np arrays
         solve_type can be "Distance" or "Manipulation1" or "Speed" (See constructor for what these mean)
         bs is an array representing the tolerance on end pose of the gripper
         '''
-        #NOTE: assumes given poses are in the l_tcp and r_tcp frames
-        lres=None
-        rres=None
-        
+        # NOTE: assumes given poses are in the l_tcp and r_tcp frames
+        lres = None
+        rres = None
+
         if left_pose is not None:
             left_pose = left_pose*self.l_tcp.inverse()
-            jmin,jmax=self.left_solvers[solve_type].joint_limits
+            jmin, jmax = self.left_solvers[solve_type].joint_limits
             if left_qinit is not None:
-                left_qinit=np.clip(left_qinit,jmin,jmax)
-            lres=self.left_solvers[solve_type].ik(left_pose.matrix,left_qinit,
-                    bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
+                left_qinit = np.clip(left_qinit, jmin, jmax)
+            lres = self.left_solvers[solve_type].ik(left_pose.matrix, left_qinit,
+                                                    bx=bs[0], by=bs[1], bz=bs[2],  brx=bs[3], bry=bs[4], brz=bs[5])
         if right_pose is not None:
             right_pose = right_pose*self.r_tcp.inverse()
-            jmin,jmax=self.right_solvers[solve_type].joint_limits
+            jmin, jmax = self.right_solvers[solve_type].joint_limits
             if right_qinit is not None:
-                right_qinit=np.clip(right_qinit,jmin,jmax)
-            rres=self.right_solvers[solve_type].ik(right_pose.matrix,right_qinit,
-                    bx=bs[0],by=bs[1],bz=bs[2],  brx=bs[3],bry=bs[4],brz=bs[5])
-        return (lres,rres)
+                right_qinit = np.clip(right_qinit, jmin, jmax)
+            rres = self.right_solvers[solve_type].ik(right_pose.matrix, right_qinit,
+                                                     bx=bs[0], by=bs[1], bz=bs[2],  brx=bs[3], bry=bs[4], brz=bs[5])
+        return (lres, rres)
 
     def fk(self, qleft=None, qright=None):
         '''
@@ -112,150 +124,160 @@ class YuMiKinematics():
         qleft,qright are np arrays 
         returns a tuple of RigidTransform
         '''
-        lres=None
-        rres=None
+        lres = None
+        rres = None
         if qleft is not None:
             lpos = self.left_solvers["Speed"].fk(qleft)
-            lres = RigidTransform(translation=lpos[:3,3],rotation=lpos[:3,:3],from_frame=self.l_tip_frame,to_frame=self.base_frame)*self.l_tcp
+            lres = RigidTransform(translation=lpos[:3, 3], rotation=lpos[:3, :3],
+                                  from_frame=self.l_tip_frame, to_frame=self.base_frame)*self.l_tcp
         if qright is not None:
             rpos = self.right_solvers["Speed"].fk(qright)
-            rres = RigidTransform(translation=rpos[:3,3],rotation=rpos[:3,:3],from_frame=self.r_tip_frame,to_frame=self.base_frame)*self.r_tcp
-        return (lres,rres)
+            rres = RigidTransform(translation=rpos[:3, 3], rotation=rpos[:3, :3],
+                                  from_frame=self.r_tip_frame, to_frame=self.base_frame)*self.r_tcp
+        return (lres, rres)
 
-    def refine_state(self,l_state=None,r_state=None,t_tol=.05,r_tol=.5):
+    def refine_state(self, l_state=None, r_state=None, t_tol=.05, r_tol=.5):
         '''
         attempts to find a configuration that the robot can move to without
         deviating from its current position more than t_tol in translation and r_tol in orientation
         '''
-        #technique 1: try linearly interpolating in joint space to desired config, and if the pose doesn't leave the bounds, return it.
-        l_pos,r_pos = self.fk(l_state,r_state)
-        l_des,r_des = self.ik(l_pos,r_pos,l_state,r_state,"Manipulation1")
-        lres=[]
-        rres=[]
+        # technique 1: try linearly interpolating in joint space to desired config, and if the pose doesn't leave the bounds, return it.
+        l_pos, r_pos = self.fk(l_state, r_state)
+        l_des, r_des = self.ik(l_pos, r_pos, l_state, r_state, "Manipulation1")
+        lres = []
+        rres = []
         if l_state is not None:
-            traj = np.linspace(l_state,l_des,20)
-            tdev,rdev = self.max_deviation(traj,l_pos,"qleft")
-            if(tdev<t_tol and rdev<r_tol):
+            traj = np.linspace(l_state, l_des, 20)
+            tdev, rdev = self.max_deviation(traj, l_pos, "qleft")
+            if(tdev < t_tol and rdev < r_tol):
                 lres = traj
         if r_state is not None:
-            traj = np.linspace(r_state,r_des,20)
-            tdev,rdev = self.max_deviation(traj,r_pos,"qright")
-            if(tdev<t_tol and rdev<r_tol):
+            traj = np.linspace(r_state, r_des, 20)
+            tdev, rdev = self.max_deviation(traj, r_pos, "qright")
+            if(tdev < t_tol and rdev < r_tol):
                 rres = traj
-        return lres,rres
+        return lres, rres
 
-    def max_deviation(self,traj,pose,arm_name):
+    def max_deviation(self, traj, pose, arm_name):
         '''
         finds the maximum deviation (meters,radians) of the tcp from the given pose
         arm_name is "qleft" or "qright"
         '''
-        tmax=0
-        rmax=0
+        tmax = 0
+        rmax = 0
         for q in traj:
-            r = self.fk(**{arm_name:q})
+            r = self.fk(**{arm_name: q})
             p = pick(r)
-            tmax = max(np.linalg.norm(p.translation-pose.translation),tmax)
-            rmax = max(quat_dist(p.quaternion,pose.quaternion),rmax)
-        return tmax,rmax
+            tmax = max(np.linalg.norm(p.translation-pose.translation), tmax)
+            rmax = max(quat_dist(p.quaternion, pose.quaternion), rmax)
+        return tmax, rmax
 
-    def compute_cartesian_path(self,l_start=None,l_goal=None,l_qinit=None,r_start=None,r_goal=None,r_qinit=None,
-            N=20,jump_thresh=.4):
+    def compute_cartesian_path(self, l_start=None, l_goal=None, l_qinit=None, r_start=None, r_goal=None, r_qinit=None,
+                               N=20, jump_thresh=.4,mode='Speed'):
         '''
         Returns a traj interpolated linearly in cartesian space along the path between start and end
         all poses should be RigidTransform objects
         N is the mnumber of points to use when interpolating
         If no qinit is specified, the solver won't necessarily produce a close solution, so there may be
         a large motion to get to the first waypoint in the path
-        
+
         mid_tol and end_tol give tolerances on deviation from middle waypoints and final waypoint
         the first coordinate is translational deviation, and second is rotational deviation
         '''
-        #NOTE: assumes given poses are in the l_tcp and r_tcp frames
-        lres=[]
-        rres=[]
+        # NOTE: assumes given poses are in the l_tcp and r_tcp frames
+        lres = []
+        rres = []
         if(l_start is not None and l_goal is not None):
-           l_start = l_start*self.l_tcp.inverse()
-           l_goal  = l_goal*self.l_tcp.inverse()
-           waypoints = l_start.linear_trajectory_to(l_goal,N)
-           joint_traj = self.compute_traj(self.left_solvers,waypoints[1:],jump_thresh,l_qinit)
-           if self.check_jumps(joint_traj,jump_thresh):
-               print("Warning: jump detected in left traj")
-           lres = joint_traj
+            l_start = l_start*self.l_tcp.inverse()
+            l_goal = l_goal*self.l_tcp.inverse()
+            waypoints = l_start.linear_trajectory_to(l_goal, N)
+            joint_traj = self.compute_traj(
+                self.left_solvers, waypoints[1:], jump_thresh, l_qinit,mode=mode)
+            if self.check_jumps(joint_traj, jump_thresh):
+                print("Warning: jump detected in left traj")
+            lres = joint_traj
         if(r_start is not None and r_goal is not None):
             r_start = r_start*self.r_tcp.inverse()
             r_goal = r_goal*self.r_tcp.inverse()
-            waypoints = r_start.linear_trajectory_to(r_goal,N)
-            joint_traj = self.compute_traj(self.right_solvers,waypoints[1:],jump_thresh,r_qinit)
-            if self.check_jumps(joint_traj,jump_thresh):
-               print("Warning: jump detected in right traj")
-            rres=joint_traj
-        return (lres,rres)
+            waypoints = r_start.linear_trajectory_to(r_goal, N)
+            joint_traj = self.compute_traj(
+                self.right_solvers, waypoints[1:], jump_thresh, r_qinit,mode=mode)
+            if self.check_jumps(joint_traj, jump_thresh):
+                print("Warning: jump detected in right traj")
+            rres = joint_traj
+        return (lres, rres)
 
-    def interpolate_cartesian_waypoints(self,l_waypoints=None,r_waypoints=None,
-            l_qinit=None,r_qinit=None,N=20):
+    def interpolate_cartesian_waypoints(self, l_waypoints=None, r_waypoints=None,
+                                        l_qinit=None, r_qinit=None, N=60,mode='Speed'):
         '''
         Convenience function for chaining together a bunch of cartesian paths linearly
         makes successive calls to compute_cartesian_path
         '''
-        #NOTE: assumes given poses are in the l_tcp and r_tcp frames
-        lres=[]
-        rres=[]
-        if l_waypoints is not None and len(l_waypoints)>1:
-            traj=[]
+        # NOTE: assumes given poses are in the l_tcp and r_tcp frames
+        lres = []
+        rres = []
+        if l_waypoints is not None and len(l_waypoints) > 1:
+            traj = []
             for i in range(len(l_waypoints)-1):
-                p,_=self.compute_cartesian_path(l_start=l_waypoints[i],l_goal=l_waypoints[i+1],
-                        l_qinit=l_qinit,N=N)
-                traj+=p
-                l_qinit=traj[-1]
-            lres=traj
-        if r_waypoints is not None and len(r_waypoints)>1:
-            traj=[]
+                p, _ = self.compute_cartesian_path(l_start=l_waypoints[i], l_goal=l_waypoints[i+1],
+                                                   l_qinit=l_qinit, N=N,mode=mode)
+                traj += p
+                l_qinit = traj[-1]
+            lres = traj
+        if r_waypoints is not None and len(r_waypoints) > 1:
+            traj = []
             for i in range(len(r_waypoints)-1):
-                _,p=self.compute_cartesian_path(r_start=r_waypoints[i],r_goal=r_waypoints[i+1],
-                        r_qinit=r_qinit,N=N)
-                traj+=p
-                r_qinit=traj[-1]
-            rres=traj
-        return (lres,rres)
+                _, p = self.compute_cartesian_path(r_start=r_waypoints[i], r_goal=r_waypoints[i+1],
+                                                   r_qinit=r_qinit, N=N,mode=mode)
+                traj += p
+                r_qinit = traj[-1]
+            rres = traj
+        return (lres, rres)
 
-    def compute_traj(self, solvers, waypoints, jump_thresh,qinit=None):
+    def compute_traj(self, solvers, waypoints, jump_thresh, qinit=None,mode='Speed'):
         '''
         Calculates the IK for each pose in waypoints
         solvers=either self.left_solvers or self.right_solvers
         waypoints=list of RigidTransform
         jump_thresh=describes the max allowed distance between joint configs
         '''
-        joint_traj=[]
+        joint_traj = []
         if qinit is not None:
-            jmin,jmax=solvers['Speed'].joint_limits
-            qinit=np.clip(qinit,jmin,jmax)
-        #this call doesn't include the tcp because waypoints must already be in the gripper_{l,r}_base frame
-        joint_traj.append(solvers["Speed"].ik(waypoints[0].matrix,qinit,bx=.001,by=.001,bz=.001,brx=.2,bry=.2,brz=.2))
-        for i in range(1,len(waypoints)-1):
+            jmin, jmax = solvers['Speed'].joint_limits
+            qinit = np.clip(qinit, jmin, jmax)
+        rtol = .002
+        ttol = .0005
+        # this call doesn't include the tcp because waypoints must already be in the gripper_{l,r}_base frame
+        joint_traj.append(solvers[mode].ik(
+            waypoints[0].matrix, qinit, bx=ttol, by=ttol, bz=ttol, brx=rtol, bry=rtol, brz=rtol))
+        for i in range(1, len(waypoints)-1):
             m = waypoints[i].matrix
-            joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1],bx=.001,by=.001,bz=.001,brx=.2,bry=.2,brz=.2))
+            joint_traj.append(solvers[mode].ik(
+                m, joint_traj[-1], bx=ttol, by=ttol, bz=ttol, brx=rtol, bry=rtol, brz=rtol))
         m = waypoints[-1].matrix
-        joint_traj.append(solvers["Speed"].ik(m,joint_traj[-1]))
+        joint_traj.append(solvers[mode].ik(m, joint_traj[-1]))
         return joint_traj
 
-    def check_jumps(self,joint_traj,jump_thresh):
+    def check_jumps(self, joint_traj, jump_thresh):
         '''
         this function takes a joint traj and returns whether there is a jump exceeding jump_thresh
         '''
-        if len(joint_traj)<2:return
+        if len(joint_traj) < 2:
+            return
         tmp = joint_traj[0]
-        jmps=False
-        for i in range(1,len(joint_traj)): 
-            diffvec=abs(joint_traj[i]-tmp)
-            diff=np.max(diffvec)
-            if diff>jump_thresh:
-                print(f"Jump of magnitude {diff} found in joint {np.argmax(diffvec)}")
-                if(np.max(diffvec[0:4])>jump_thresh):
+        jmps = False
+        for i in range(1, len(joint_traj)):
+            diffvec = abs(joint_traj[i]-tmp)
+            diff = np.max(diffvec)
+            if diff > jump_thresh:
+                print(
+                    f"Jump of magnitude {diff} found in joint {np.argmax(diffvec)}")
+                if(np.max(diffvec[0:4]) > jump_thresh):
                     raise Exception("Jump in first 4 joints, aborting")
-                jmps=True
-            tmp=joint_traj[i]
+                jmps = True
+            tmp = joint_traj[i]
         return jmps
-    
+
     '''
     For some ungodly reason, yumi doesn't format the joint data in order of physical joint
     the actual order is [1,2,4,5,6,7,3]
@@ -264,19 +286,20 @@ class YuMiKinematics():
     '''
     @staticmethod
     def urdf_order_2_yumi(q):
-        qnew=np.zeros(7)
-        qnew[6]=q[2]
-        qnew[0:2]=q[0:2]
-        qnew[2:6]=q[3:7]
+        qnew = np.zeros(7)
+        qnew[6] = q[2]
+        qnew[0:2] = q[0:2]
+        qnew[2:6] = q[3:7]
         return qnew
 
     @staticmethod
     def yumi_order_2_urdf(q):
-        qnew=np.zeros(7)
-        qnew[0:2]=q[0:2]
-        qnew[2]=q[6]
-        qnew[3:7]=q[2:6]
+        qnew = np.zeros(7)
+        qnew[0:2] = q[0:2]
+        qnew[2] = q[6]
+        qnew[3:7] = q[2:6]
         return qnew
+
     @staticmethod
     def yumi_format_2_urdf(q):
         return np.deg2rad(YuMiKinematics.yumi_order_2_urdf(q))
@@ -285,7 +308,8 @@ class YuMiKinematics():
     def urdf_format_2_yumi(q):
         return np.rad2deg(YuMiKinematics.urdf_order_2_yumi(q))
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     pass
 '''
 DH parameters taken from yumi file in abb robostudio

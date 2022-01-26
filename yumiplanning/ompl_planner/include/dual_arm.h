@@ -9,15 +9,16 @@
 namespace YuMiPlanning{
 class DualArmValidity{
 public:
-    DualArmValidity(CollisionChecker checker):colChecker(checker){}
+    DualArmValidity(CollisionChecker checker,double table_z):colChecker(checker),table_z(table_z){}
     bool isValid(const ompl::base::State *state){
         auto q = state->as<ompl::base::RealVectorStateSpace::StateType>();
         std::vector<double> q_l(7);
         std::vector<double> q_r(7);
         for(int i=0;i<7;i++)q_l[i] = (*q)[i];
         for(int i=0;i<7;i++)q_r[i] = (*q)[i+7];
-        return !colChecker.isColliding(q_l,q_r);
+        return !colChecker.isColliding(q_l,q_r,table_z);
     }
+    double table_z;
 private:
     CollisionChecker colChecker;
 };
@@ -32,17 +33,18 @@ public:
         space->as<ompl::base::RealVectorStateSpace>()->setBounds(bounds);
         //use simplesetup to make a planner
         setup = ompl::geometric::SimpleSetupPtr(new ompl::geometric::SimpleSetup(space));
-        validity=std::make_shared<DualArmValidity>(checker);
+        validity=std::make_shared<DualArmValidity>(checker,0);
         std::function<bool(const ompl::base::State*)> fun;
         fun=std::bind<bool>(&DualArmValidity::isValid,validity,std::placeholders::_1);
         setup->setStateValidityChecker(fun);
-        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.004);//This is fraction of state space, not radians
+        setup->getSpaceInformation()->setStateValidityCheckingResolution(0.005);//This is fraction of state space, not radians
         ompl::base::PlannerPtr planner(new ompl::geometric::RRTConnect(setup->getSpaceInformation()));
-        planner->as<ompl::geometric::RRTConnect>()->setRange(.1);
+        planner->as<ompl::geometric::RRTConnect>()->setRange(.4);
         setup->setPlanner(planner);
     }
-    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout){
+    ompl::geometric::PathGeometric planPath(std::vector<double> s,std::vector<double>g,double timeout,double table_z){
         //execute the solve
+        validity->table_z=table_z;
         auto start=getState(s,setup);
         auto goal=getState(g,setup);
         setup->clear();
@@ -57,7 +59,6 @@ public:
                 break;
             }
             setup->clear();
-            std::cout<<"You can safely ignore the above error message\n";
         }
         setup->simplifySolution();
         if(setup->haveExactSolutionPath()){
@@ -66,9 +67,9 @@ public:
         }
         return ompl::geometric::PathGeometric(setup->getSpaceInformation());
     }
-    std::vector<std::vector<double> > planPathPy(std::vector<double> s,std::vector<double>g,double timeout){
+    std::vector<std::vector<double> > planPathPy(std::vector<double> s,std::vector<double>g,double timeout,double table_z=.02){
         //execute the solve
-        ompl::geometric::PathGeometric path=planPath(s,g,timeout);
+        ompl::geometric::PathGeometric path=planPath(s,g,timeout,table_z);
         std::vector<std::vector<double> > res;
         for(int s=0;s<path.getStateCount();s++){
             std::vector<double> q(14);
